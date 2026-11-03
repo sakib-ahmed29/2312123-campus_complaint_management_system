@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from sqlalchemy.pool import NullPool
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 
@@ -66,8 +67,22 @@ database_url = os.getenv("DATABASE_URL")
 if not database_url:
     db_file = Path("/tmp/ccms.db") if os.getenv("VERCEL") else Path(__file__).resolve().parent / "ccms.db"
     database_url = f"sqlite:///{db_file}"
-connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-engine = create_engine(database_url, connect_args=connect_args, echo=False)
+
+# Supabase's pooler URL uses postgresql:// by default. Explicitly select
+# psycopg 3 (installed in requirements.txt), rather than SQLAlchemy's
+# default psycopg2 driver. NullPool avoids keeping serverless connections
+# open between Vercel function invocations.
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
+elif database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+is_sqlite = database_url.startswith("sqlite")
+connect_args = {"check_same_thread": False} if is_sqlite else {}
+engine_options = {"connect_args": connect_args, "echo": False}
+if not is_sqlite:
+    engine_options["poolclass"] = NullPool
+engine = create_engine(database_url, **engine_options)
 
 
 def get_session():
