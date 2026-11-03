@@ -142,9 +142,11 @@ def update_complaint(complaint_id: int, payload: ComplaintUpdate, session: Sessi
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="Provide at least one field to update")
-    for key in ("title", "description"):
-        if key in changes and changes[key] is not None:
-            changes[key] = changes[key].strip()
+    for key, value in changes.items():
+        if value is None:
+            raise HTTPException(status_code=422, detail=f"{key.capitalize()} cannot be null")
+        if key in ("title", "description"):
+            changes[key] = value.strip()
             minimum = 5 if key == "title" else 10
             if len(changes[key]) < minimum:
                 raise HTTPException(status_code=422, detail=f"{key.capitalize()} must contain at least {minimum} characters")
