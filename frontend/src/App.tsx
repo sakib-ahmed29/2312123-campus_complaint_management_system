@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import type { FormEvent } from "react"
 
 type Category = "academic" | "hostel" | "library" | "cafeteria" | "transport" | "it_network" | "other"
 type Status = "pending" | "in_progress" | "resolved" | "rejected"
