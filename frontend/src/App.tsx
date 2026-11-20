@@ -91,6 +91,15 @@ export default function App() {
     () => complaints.find((item) => item.id === selected) ?? null,
     [complaints, selected],
   )
+  useEffect(() => {
+  if (!activeComplaint) return
+
+  if (activeComplaint.status === "pending") {
+    setNextStatus("in_progress")
+  } else if (activeComplaint.status === "in_progress") {
+    setNextStatus("resolved")
+  }
+}, [activeComplaint?.id, activeComplaint?.status])
   const counts = useMemo(() => ({
     total: complaints.length,
     pending: complaints.filter((item) => item.status === "pending").length,
