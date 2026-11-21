@@ -13,6 +13,7 @@ from typing import Literal
 from uuid import uuid4
 
 import jwt
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
@@ -24,6 +25,8 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 Role = Literal["user", "admin"]
 Category = Literal["academic", "hostel", "library", "cafeteria", "transport", "it_network", "other"]
 ComplaintStatus = Literal["pending", "in_progress", "resolved", "rejected"]
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 password_hasher = PasswordHash.recommended()
 bearer = HTTPBearer(auto_error=False)
 ACCESS_MINUTES = 15
@@ -40,6 +43,8 @@ def now() -> datetime:
 def get_secret(name: str, local_default: str | None = None) -> str:
     value = os.getenv(name)
     if value:
+        if os.getenv("VERCEL") and len(value.encode()) < 32:
+            raise RuntimeError(f"{name} must contain at least 32 bytes")
         return value
     if os.getenv("VERCEL"):
         raise RuntimeError(f"{name} must be configured in the deployment environment")
@@ -216,6 +221,13 @@ class BanInput(SQLModel):
 class GroupCreate(SQLModel):
     name: str = Field(min_length=2, max_length=100)
     description: str = Field(default="", max_length=1000)
+
+
+class MemberInvite(SQLModel):
+    email: str = Field(min_length=5, max_length=254)
+    can_create: bool = False
+    can_edit: bool = False
+    can_assign: bool = False
 
 
 class MemberPermissions(SQLModel):
@@ -925,3 +937,24 @@ def admin_revoke_session(session_id: str, request: Request, user: User = Depends
     audit(session, request, "session_revoked_by_admin", user.id, "session", session_id)
     session.commit()
     return Response(status_code=204)
+
+
+
+@app.post("/api/v1/groups/{group_id}/invite", status_code=201)
+def invite_group_member(group_id: str, payload: MemberInvite, user: User = Depends(current_user), session: Session = Depends(get_session)):
+    group = session.get(CampusGroup, group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+    if group.owner_id != user.id:
+        raise HTTPException(403, "Only the group owner can manage members")
+    target = session.exec(select(User).where(User.email == payload.email.strip().lower())).first()
+    if not target:
+        raise HTTPException(404, "No account exists for that email")
+    if member_for(session, group_id, target.id):
+        raise HTTPException(409, "User is already a group member")
+    membership = GroupMember(group_id=group_id, user_id=target.id, can_create=payload.can_create,
+                             can_edit=payload.can_edit, can_assign=payload.can_assign)
+    session.add(membership)
+    session.commit()
+    return {"group_id": group_id, "user_id": target.id, "email": target.email,
+            "can_create": membership.can_create, "can_edit": membership.can_edit, "can_assign": membership.can_assign}
