@@ -207,6 +207,34 @@ class GroupRecordUpdate(SQLModel):
     assignee_id: int | None = None
 
 
+
+def complaint_out(row: Complaint) -> dict:
+    return {"id": row.id, "owner_id": row.owner_id, "title": row.title, "description": row.description,
+            "category": row.category, "status": row.status, "admin_response": row.admin_response,
+            "created_at": row.created_at, "updated_at": row.updated_at}
+
+
+def group_out(row: Group) -> dict:
+    return {"id": row.id, "name": row.name, "owner_id": row.owner_id, "created_at": row.created_at}
+
+
+def member_out(row: GroupMember) -> dict:
+    return {"id": row.id, "group_id": row.group_id, "user_id": row.user_id,
+            "can_create": row.can_create, "can_edit": row.can_edit, "can_assign": row.can_assign}
+
+
+def record_out(row: GroupRecord) -> dict:
+    return {"id": row.id, "group_id": row.group_id, "created_by": row.created_by, "title": row.title,
+            "body": row.body, "assignee_id": row.assignee_id, "created_at": row.created_at,
+            "updated_at": row.updated_at}
+
+
+def audit_out(row: AuditEvent) -> dict:
+    return {"id": row.id, "user_id": row.user_id, "event": row.event, "target_type": row.target_type,
+            "target_id": row.target_id, "detail": row.detail, "ip_address": row.ip_address,
+            "user_agent": row.user_agent, "created_at": row.created_at}
+
+
 def get_session():
     with Session(engine) as session:
         yield session
@@ -458,7 +486,7 @@ def create_complaint(payload: ComplaintCreate, request: Request, user: Annotated
     session.refresh(item)
     log_event(session, request, "complaint_create", user.id, "complaint", str(item.id))
     session.commit()
-    return item
+    return complaint_out(item)
 
 
 @app.get("/api/v1/complaints")
@@ -472,13 +500,14 @@ def list_complaints(user: Annotated[User, Depends(current_user)], session: Annot
         statement = statement.where(Complaint.status == status)
     if category:
         statement = statement.where(Complaint.category == category)
-    return session.exec(statement.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)).all()
+    rows = session.exec(statement.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)).all()
+    return [complaint_out(row) for row in rows]
 
 
 @app.get("/api/v1/complaints/{complaint_id}")
 def get_complaint(complaint_id: int, user: Annotated[User, Depends(current_user)],
                   session: Annotated[Session, Depends(get_session)]):
-    return owned_complaint(complaint_id, user, session, admin_allowed=True)
+    return complaint_out(owned_complaint(complaint_id, user, session, admin_allowed=True))
 
 
 @app.patch("/api/v1/complaints/{complaint_id}")
@@ -498,7 +527,7 @@ def update_complaint(complaint_id: int, payload: ComplaintUpdate, user: Annotate
     session.add(item)
     session.commit()
     session.refresh(item)
-    return item
+    return complaint_out(item)
 
 
 @app.delete("/api/v1/complaints/{complaint_id}", status_code=204)
@@ -534,7 +563,7 @@ def update_complaint_status(complaint_id: int, payload: StatusUpdate, request: R
     log_event(session, request, "complaint_status_change", user.id, "complaint", str(item.id), payload.status)
     session.commit()
     session.refresh(item)
-    return item
+    return complaint_out(item)
 
 
 @app.get("/api/v1/users/me/dashboard")
@@ -665,7 +694,8 @@ def admin_activity(admin: Annotated[User, Depends(require_role("admin"))],
         statement = statement.where(AuditEvent.event == event)
     if q:
         statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q))
-    return session.exec(statement.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)).all()
+    rows = session.exec(statement.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)).all()
+    return [audit_out(row) for row in rows]
 
 
 @app.get("/api/v1/admin/security")
@@ -716,7 +746,8 @@ def create_group(payload: GroupCreate, user: Annotated[User, Depends(current_use
     session.refresh(group)
     session.add(GroupMember(group_id=group.id, user_id=user.id, can_create=True, can_edit=True, can_assign=True))
     session.commit()
-    return group
+    session.refresh(group)
+    return group_out(group)
 
 
 def group_access(group_id: int, user: User, session: Session) -> tuple[Group, GroupMember | None]:
@@ -731,7 +762,7 @@ def group_access(group_id: int, user: User, session: Session) -> tuple[Group, Gr
 
 @app.get("/api/v1/groups")
 def list_groups(user: Annotated[User, Depends(current_user)], session: Annotated[Session, Depends(get_session)]):
-    return session.exec(select(Group).join(GroupMember, Group.id == GroupMember.group_id).where(GroupMember.user_id == user.id)).all()
+    return [group_out(g) for g in session.exec(select(Group).join(GroupMember, Group.id == GroupMember.group_id).where(GroupMember.user_id == user.id)).all()]
 
 
 @app.post("/api/v1/groups/{group_id}/members")
@@ -749,7 +780,8 @@ def add_group_member(group_id: int, payload: MemberPermissions, user: Annotated[
     member.can_create, member.can_edit, member.can_assign = payload.can_create, payload.can_edit, payload.can_assign
     session.add(member)
     session.commit()
-    return member
+    session.refresh(member)
+    return member_out(member)
 
 
 @app.patch("/api/v1/groups/{group_id}")
@@ -761,7 +793,7 @@ def rename_group(group_id: int, payload: GroupCreate, user: Annotated[User, Depe
     group.name = payload.name.strip()
     session.add(group)
     session.commit()
-    return group
+    return group_out(group)
 
 
 @app.delete("/api/v1/groups/{group_id}", status_code=204)
@@ -805,7 +837,8 @@ def create_group_record(group_id: int, payload: GroupRecordCreate, user: Annotat
 def list_group_records(group_id: int, user: Annotated[User, Depends(current_user)],
                        session: Annotated[Session, Depends(get_session)]):
     group_access(group_id, user, session)
-    return session.exec(select(GroupRecord).where(GroupRecord.group_id == group_id).order_by(GroupRecord.created_at.desc())).all()
+    rows = session.exec(select(GroupRecord).where(GroupRecord.group_id == group_id).order_by(GroupRecord.created_at.desc())).all()
+    return [record_out(row) for row in rows]
 
 
 @app.patch("/api/v1/groups/{group_id}/records/{record_id}")
@@ -825,7 +858,8 @@ def update_group_record(group_id: int, record_id: int, payload: GroupRecordUpdat
     record.updated_at = now()
     session.add(record)
     session.commit()
-    return record
+    session.refresh(record)
+    return record_out(record)
 
 
 @app.delete("/api/v1/groups/{group_id}/members/{member_user_id}", status_code=204)
@@ -885,7 +919,8 @@ def admin_records(admin: Annotated[User, Depends(require_role("admin"))],
         statement = statement.where(Complaint.status == status)
     if category:
         statement = statement.where(Complaint.category == category)
-    return session.exec(statement.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)).all()
+    rows = session.exec(statement.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)).all()
+    return [complaint_out(row) for row in rows]
 
 
 @app.delete("/api/v1/admin/records/{record_id}", status_code=204)
@@ -904,7 +939,7 @@ def admin_delete_record(record_id: int, request: Request,
 @app.get("/api/v1/admin/groups")
 def admin_groups(admin: Annotated[User, Depends(require_role("admin"))],
                  session: Annotated[Session, Depends(get_session)]):
-    return session.exec(select(Group).order_by(Group.created_at.desc())).all()
+    return [group_out(row) for row in session.exec(select(Group).order_by(Group.created_at.desc())).all()]
 
 
 @app.delete("/api/v1/admin/groups/{group_id}", status_code=204)
