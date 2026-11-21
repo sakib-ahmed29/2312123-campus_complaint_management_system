@@ -288,6 +288,12 @@ def owned_complaint(complaint_id: int, user: User, session: Session, admin_allow
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     SQLModel.metadata.create_all(engine)
+    # Upgrade the original MVP complaint table without destroying existing records.
+    from sqlalchemy import inspect, text
+    columns = {column["name"] for column in inspect(engine).get_columns("complaint")}
+    if "owner_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text('ALTER TABLE complaint ADD COLUMN owner_id INTEGER REFERENCES "user"(id)'))
     if os.getenv("VERCEL") and (not os.getenv("JWT_SECRET") or not os.getenv("PASSWORD_PEPPER")):
         raise RuntimeError("JWT_SECRET and PASSWORD_PEPPER must be configured in Vercel")
     yield
@@ -374,7 +380,8 @@ def logout(request: Request, response: Response, session: Annotated[Session, Dep
     log_event(session, request, "logout", user.id)
     session.commit()
     response.delete_cookie(COOKIE_NAME, path="/api/v1/auth")
-    return Response(status_code=204)
+    response.status_code = 204
+    return response
 
 
 @app.get("/api/v1/auth/sessions")
