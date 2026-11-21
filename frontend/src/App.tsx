@@ -273,6 +273,8 @@ function AdminDashboard() {
   const [roleFilter,setRoleFilter]=useState("")
   const [statusFilter,setStatusFilter]=useState("")
   const [selectedUserIds,setSelectedUserIds]=useState<number[]>([])
+  const [adminId,setAdminId]=useState<number|null>(null)
+  const [userOffset,setUserOffset]=useState(0)
   const [userDetail,setUserDetail]=useState<any>(null)
   const [selectedRecordIds,setSelectedRecordIds]=useState<number[]>([])
   const [selectedGroupIds,setSelectedGroupIds]=useState<number[]>([])
@@ -285,7 +287,7 @@ function AdminDashboard() {
     try {
       const [s, u, a, r, g, sec] = await Promise.all([
         api<Record<string,number>>("/api/v1/admin/stats"),
-        api<typeof users>(`/api/v1/admin/users?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}&limit=50`),
+        api<typeof users>(`/api/v1/admin/users?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}&offset=${userOffset}&limit=50`),
         api<typeof activity>("/api/v1/admin/activity?limit=30"),
         api<typeof records>("/api/v1/admin/records?limit=100"),
         api<typeof groups>("/api/v1/admin/groups"),
@@ -296,11 +298,11 @@ function AdminDashboard() {
     finally { setBusy(false) }
   }
   useEffect(() => { void load() }, [])
-  async function act(userId:number, action:"ban"|"unban"|"promote") {
+  async function act(userId:number, action:"ban"|"unban"|"promote"|"demote") {
     try {
       if(action==="ban") await api(`/api/v1/admin/users/${userId}/ban`, {method:"POST",body:JSON.stringify({reason})})
       if(action==="unban") await api(`/api/v1/admin/users/${userId}/unban`, {method:"POST",body:JSON.stringify({reason})})
-      if(action==="promote") await api(`/api/v1/admin/users/${userId}/role`, {method:"PATCH",body:JSON.stringify({role:"admin"})})
+      if(action==="promote") await api(`/api/v1/admin/users/${userId}/role`, {method:"PATCH",body:JSON.stringify({role:"admin"})})\n      if(action==="demote") await api(`/api/v1/admin/users/${userId}/role`, {method:"PATCH",body:JSON.stringify({role:"user"})})
       await load()
     } catch(e) { setError(e instanceof Error ? e.message : "Action failed") }
   }
@@ -315,7 +317,7 @@ function AdminDashboard() {
     <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}><input aria-label="Search users" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search name or email"/><select value={roleFilter} onChange={e=>setRoleFilter(e.target.value)}><option value="">All roles</option><option value="user">User</option><option value="admin">Admin</option></select><select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="banned">Banned</option></select><button className="button secondary" onClick={()=>void load()}>Search / filter</button></div><div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}><button className="button danger-ghost" disabled={!selectedUserIds.length} onClick={async()=>{try{await api(`/api/v1/admin/users/bulk-ban?reason=${encodeURIComponent(reason)}`,{method:"POST",body:JSON.stringify(selectedUserIds)});setSelectedUserIds([]);await load()}catch(e){setError(e instanceof Error?e.message:"Bulk ban failed")}}}>Bulk ban selected</button><button className="button secondary" disabled={!selectedUserIds.length} onClick={async()=>{try{await api(`/api/v1/admin/users/bulk-unban?reason=${encodeURIComponent(reason)}`,{method:"POST",body:JSON.stringify(selectedUserIds)});setSelectedUserIds([]);await load()}catch(e){setError(e instanceof Error?e.message:"Bulk unban failed")}}}>Bulk unban selected</button></div>
     <label>Reason for ban / unban <input value={reason} onChange={e=>setReason(e.target.value)} /></label>
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Select</th><th>ID</th><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-      {users.map(u=><tr key={u.id}><td><input type="checkbox" checked={selectedUserIds.includes(u.id)} onChange={e=>setSelectedUserIds(e.target.checked?[...selectedUserIds,u.id]:selectedUserIds.filter(id=>id!==u.id))}/></td><td>{u.id}</td><td>{u.full_name}<br/><small>{u.email}</small></td><td>{u.role}</td><td>{u.is_banned?"Banned":"Active"}</td><td style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="button secondary" onClick={async()=>{try{setUserDetail(await api(`/api/v1/admin/users/${u.id}`))}catch(e){setError(e instanceof Error?e.message:"Could not load user")}}}>Details</button><button className="button secondary" onClick={async()=>{try{await api(`/api/v1/admin/users/${u.id}/revoke-sessions`,{method:"POST"});await load()}catch(e){setError(e instanceof Error?e.message:"Could not revoke sessions")}}}>Revoke sessions</button>{u.role==="user" && <button className="button secondary" onClick={()=>void act(u.id,"promote")}>Make admin</button>}{u.role==="user" && (u.is_banned?<button className="button secondary" onClick={()=>void act(u.id,"unban")}>Unban</button>:<button className="button danger-ghost" onClick={()=>void act(u.id,"ban")}>Ban</button>)}</td></tr>)}
+      {users.map(u=><tr key={u.id}><td><input type="checkbox" checked={selectedUserIds.includes(u.id)} onChange={e=>setSelectedUserIds(e.target.checked?[...selectedUserIds,u.id]:selectedUserIds.filter(id=>id!==u.id))}/></td><td>{u.id}</td><td>{u.full_name}<br/><small>{u.email}</small></td><td>{u.role}</td><td>{u.is_banned?"Banned":"Active"}</td><td style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="button secondary" onClick={async()=>{try{setUserDetail(await api(`/api/v1/admin/users/${u.id}`))}catch(e){setError(e instanceof Error?e.message:"Could not load user")}}}>Details</button><button className="button secondary" onClick={async()=>{try{await api(`/api/v1/admin/users/${u.id}/revoke-sessions`,{method:"POST"});await load()}catch(e){setError(e instanceof Error?e.message:"Could not revoke sessions")}}}>Revoke sessions</button>{u.role==="user" && <button className="button secondary" onClick={()=>void act(u.id,"promote")}>Make admin</button>}{u.role==="admin" && u.id!==adminId && <button className="button secondary" onClick={()=>void act(u.id,"demote")}>Make user</button>}{u.role==="user" && (u.is_banned?<button className="button secondary" onClick={()=>void act(u.id,"unban")}>Unban</button>:<button className="button danger-ghost" onClick={()=>void act(u.id,"ban")}>Ban</button>)}</td></tr>)}
     </tbody></table></div>
     {userDetail&&<div className="panel" style={{padding:16,marginTop:16}}><button className="button secondary" onClick={()=>setUserDetail(null)}>Close details</button><h3>{userDetail.user.full_name} · {userDetail.user.email}</h3><p>Complaints: {userDetail.complaints.length} · Groups: {userDetail.groups.length} · Sessions: {userDetail.sessions.length} · Recent events: {userDetail.activity.length}</p><h4>Recent complaints</h4><ul>{userDetail.complaints.slice(0,5).map((c:any)=><li key={c.id}>#{c.id} {c.title} — {c.status}</li>)}</ul><h4>Groups</h4><ul>{userDetail.groups.map((g:any)=><li key={g.id}>{g.name} (#{g.id})</li>)}</ul><h4>Recent activity</h4><ul>{userDetail.activity.slice(0,5).map((a:any)=><li key={a.id}>{a.event} · {new Date(a.created_at).toLocaleString()}</li>)}</ul></div>}
     <h3 style={{marginTop:28}}>Content moderation</h3>
