@@ -69,6 +69,8 @@ class User(SQLModel, table=True):
     is_banned: bool = Field(default=False, index=True)
     token_version: int = 0
     ban_reason: str | None = None
+    suspended_until: datetime | None = Field(default=None, index=True)
+    suspension_reason: str | None = None
     created_at: datetime = Field(default_factory=now, index=True)
     updated_at: datetime = Field(default_factory=now)
 
@@ -175,6 +177,11 @@ class BanRequest(SQLModel):
 
 class UnbanRequest(SQLModel):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class SuspendRequest(SQLModel):
+    reason: str = Field(min_length=3, max_length=500)
+    hours: int = Field(ge=1, le=720)
 
 
 class ComplaintCreate(SQLModel):
@@ -296,6 +303,10 @@ def log_event(session: Session, request: Request, event: str, user_id: int | Non
                            user_agent=request.headers.get("user-agent")))
 
 
+def account_is_suspended(user: User) -> bool:
+    return user.suspended_until is not None and user.suspended_until > now()
+
+
 def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
                  session: Annotated[Session, Depends(get_session)]) -> User:
     if not credentials:
@@ -308,6 +319,8 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     user = session.get(User, user_id)
     if not user or user.is_banned or claims.get("ver", 0) != user.token_version:
         raise HTTPException(401, "Session is not valid")
+    if account_is_suspended(user):
+        raise HTTPException(403, f"Account suspended until {user.suspended_until.isoformat()}")
     return user
 
 
@@ -377,8 +390,8 @@ def login(payload: Login, request: Request, response: Response, session: Annotat
     user = session.exec(select(User).where(User.email == email)).first()
     valid = bool(user and verify_password(payload.password, user.password_hash))
     session.add(LoginAttempt(email_key=email, ip_address=ip, succeeded=valid))
-    if not valid or not user or user.is_banned:
-        log_event(session, request, "failed_login", user.id if user else None, detail="Invalid credentials or banned account")
+    if not valid or not user or user.is_banned or account_is_suspended(user):
+        log_event(session, request, "failed_login", user.id if user else None, detail="Invalid credentials or unavailable account")
         session.commit()
         raise HTTPException(401, "Invalid email or password")
     log_event(session, request, "login", user.id)
@@ -402,7 +415,7 @@ def refresh(request: Request, response: Response, session: Annotated[Session, De
         session.commit()
         raise HTTPException(401, "Refresh session expired or revoked")
     user = session.get(User, old.user_id)
-    if not user or user.is_banned:
+    if not user or user.is_banned or account_is_suspended(user):
         raise HTTPException(401, "Account is unavailable")
     old.revoked_at = now()
     issue_refresh(session, user, request, response)
@@ -590,12 +603,13 @@ def admin_stats(admin: Annotated[User, Depends(require_permission("admin:access"
     week = now() - timedelta(days=7)
     count_users = session.exec(select(func.count()).select_from(User)).one()
     count_banned = session.exec(select(func.count()).select_from(User).where(User.is_banned == True)).one()
+    count_suspended = session.exec(select(func.count()).select_from(User).where(User.is_banned == False, User.suspended_until > now())).one()
     count_records = session.exec(select(func.count()).select_from(Complaint)).one()
     count_groups = session.exec(select(func.count()).select_from(Group)).one()
     count_new = session.exec(select(func.count()).select_from(User).where(User.created_at >= week)).one()
     new_records = session.exec(select(func.count()).select_from(Complaint).where(Complaint.created_at >= week)).one()
     new_groups = session.exec(select(func.count()).select_from(Group).where(Group.created_at >= week)).one()
-    return {"users": count_users, "banned_users": count_banned, "records": count_records,
+    return {"users": count_users, "banned_users": count_banned, "suspended_users": count_suspended, "records": count_records,
             "groups": count_groups, "new_users_last_7_days": count_new,
             "new_records_last_7_days": new_records, "new_groups_last_7_days": new_groups}
 
@@ -611,11 +625,16 @@ def admin_users(admin: Annotated[User, Depends(require_permission("admin:access"
         statement = statement.where(User.role == role)
     if status == "banned":
         statement = statement.where(User.is_banned == True)
+    elif status == "suspended":
+        statement = statement.where(User.is_banned == False, User.suspended_until > now())
     elif status == "active":
-        statement = statement.where(User.is_banned == False)
+        statement = statement.where(User.is_banned == False).where((User.suspended_until == None) | (User.suspended_until <= now()))
     rows = session.exec(statement.order_by(User.created_at.desc()).offset(offset).limit(limit)).all()
     return [{"id": u.id, "email": u.email, "full_name": u.full_name, "role": u.role,
-             "is_banned": u.is_banned, "ban_reason": u.ban_reason, "created_at": u.created_at} for u in rows]
+             "is_banned": u.is_banned, "ban_reason": u.ban_reason,
+             "suspended_until": u.suspended_until, "suspension_reason": u.suspension_reason,
+             "status": "banned" if u.is_banned else ("suspended" if account_is_suspended(u) else "active"),
+             "created_at": u.created_at} for u in rows]
 
 
 @app.get("/api/v1/admin/users/{user_id}")
@@ -682,6 +701,42 @@ def admin_unban_user(user_id: int, payload: UnbanRequest, request: Request, admi
     log_event(session, request, "user_unbanned", admin.id, "user", str(user_id), payload.reason)
     session.commit()
     return {"id": target.id, "is_banned": False}
+
+
+@app.post("/api/v1/admin/users/{user_id}/suspend")
+def admin_suspend_user(user_id: int, payload: SuspendRequest, request: Request,
+                       admin: Annotated[User, Depends(require_permission("admin:access"))],
+                       session: Annotated[Session, Depends(get_session)]):
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    if target.id == admin.id or target.role == "admin":
+        raise HTTPException(403, "Admins cannot suspend themselves or another admin")
+    target.suspended_until = now() + timedelta(hours=payload.hours)
+    target.suspension_reason = payload.reason
+    target.token_version += 1
+    for token in session.exec(select(RefreshSession).where(
+        RefreshSession.user_id == user_id, RefreshSession.revoked_at == None
+    )).all():
+        token.revoked_at = now()
+    log_event(session, request, "user_suspended", admin.id, "user", str(user_id),
+              f"{payload.reason} (until {target.suspended_until.isoformat()})")
+    session.commit()
+    return {"id": target.id, "status": "suspended", "suspended_until": target.suspended_until}
+
+
+@app.post("/api/v1/admin/users/{user_id}/unsuspend")
+def admin_unsuspend_user(user_id: int, payload: UnbanRequest, request: Request,
+                         admin: Annotated[User, Depends(require_permission("admin:access"))],
+                         session: Annotated[Session, Depends(get_session)]):
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    target.suspended_until = None
+    target.suspension_reason = None
+    log_event(session, request, "user_unsuspended", admin.id, "user", str(user_id), payload.reason)
+    session.commit()
+    return {"id": target.id, "status": "banned" if target.is_banned else "active"}
 
 
 @app.post("/api/v1/admin/users/bulk-ban")
