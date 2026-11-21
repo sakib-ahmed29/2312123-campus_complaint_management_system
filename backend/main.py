@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import csv
 import hashlib
@@ -262,7 +263,10 @@ def get_session():
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    SQLModel.metadata.create_all(engine)
+    from alembic import command
+    from alembic.config import Config
+    migration_config = Config(str(Path(__file__).resolve().parent / "alembic.ini"))
+    command.upgrade(migration_config, "head")
     yield
 
 
