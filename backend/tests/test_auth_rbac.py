@@ -59,6 +59,7 @@ def test_user_can_only_read_own_complaints(client):
         "category": "library"
     })
     assert created.status_code == 201, created.text
+    assert "id" in created.json(), created.text
     complaint_id = created.json()["id"]
 
     signup(client, "second@example.test")
@@ -78,6 +79,7 @@ def test_normal_user_cannot_change_complaint_status(client):
         "category": "academic"
     })
     assert created.status_code == 201
+    assert "id" in created.json(), created.text
     denied = client.patch(f"/api/v1/complaints/{created.json()['id']}/status",
                           headers=headers(token), json={"status": "in_progress"})
     assert denied.status_code == 403
@@ -99,6 +101,7 @@ def test_admin_can_change_status_but_cannot_ban_another_admin(client):
         "category": "it_network"
     })
     assert created.status_code == 201
+    assert "id" in created.json(), created.text
     changed = client.patch(f"/api/v1/complaints/{created.json()['id']}/status",
                            headers=headers(admin_token), json={"status": "in_progress"})
     assert changed.status_code == 200
@@ -113,6 +116,7 @@ def test_group_permissions_are_enforced(client):
     member_token = login(client, "member@example.test")
     group = client.post("/api/v1/groups", headers=headers(owner_token), json={"name": "Facilities team"})
     assert group.status_code == 201
+    assert "id" in group.json(), group.text
     group_id = group.json()["id"]
     added = client.post(f"/api/v1/groups/{group_id}/members", headers=headers(owner_token), json={
         "user_id": member_id, "can_create": True, "can_edit": False, "can_assign": False
