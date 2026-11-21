@@ -190,7 +190,7 @@ def test_banned_user_is_rejected_on_the_next_request(client):
 
 def test_admin_can_suspend_and_restore_a_user_account(client):
     admin_id = signup(client, "suspension-admin@example.test")
-    signup(client, "suspended-user@example.test")
+    target_id = signup(client, "suspended-user@example.test")
     user_token = login(client, "suspended-user@example.test")
     with Session(engine) as db:
         admin = db.get(User, admin_id)
@@ -200,7 +200,7 @@ def test_admin_can_suspend_and_restore_a_user_account(client):
     admin_token = login(client, "suspension-admin@example.test")
 
     suspended = client.post(
-        "/api/v1/admin/users/2/suspend",
+        f"/api/v1/admin/users/{target_id}/suspend",
         headers=headers(admin_token),
         json={"reason": "Temporary policy review", "hours": 2},
     )
@@ -217,7 +217,7 @@ def test_admin_can_suspend_and_restore_a_user_account(client):
                for row in listing.json())
 
     restored = client.post(
-        "/api/v1/admin/users/2/unsuspend",
+        f"/api/v1/admin/users/{target_id}/unsuspend",
         headers=headers(admin_token),
         json={"reason": "Review completed"},
     )
