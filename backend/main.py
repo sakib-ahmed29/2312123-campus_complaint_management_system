@@ -290,6 +290,7 @@ def current_user(request: Request, credentials: HTTPAuthorizationCredentials | N
             raise ValueError("missing subject")
     except (jwt.InvalidTokenError, ValueError):
         raise HTTPException(401, "Invalid or expired access token")
+    request.state.token_scopes = payload.get("scopes", [])
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(401, "Invalid or expired access token")
@@ -302,6 +303,17 @@ def require_admin(user: User = Depends(current_user)) -> User:
     if user.role != "admin":
         raise HTTPException(403, "Administrator permission required")
     return user
+
+
+def require_scope(scope: str):
+    def dependency(request: Request, user: User = Depends(current_user)) -> User:
+        if scope not in getattr(request.state, "token_scopes", []):
+            raise HTTPException(403, f"Missing required scope: {scope}")
+        if scope.startswith("admin:") or scope == "complaint:moderate":
+            if user.role != "admin":
+                raise HTTPException(403, "Administrator permission required")
+        return user
+    return dependency
 
 
 def set_refresh_cookie(response: Response, token: str) -> None:
@@ -803,4 +815,109 @@ def admin_delete_group(group_id: str, request: Request, user: User = Depends(req
     for row in session.exec(select(GroupRecord).where(GroupRecord.group_id == group_id)).all(): session.delete(row)
     for row in session.exec(select(GroupMember).where(GroupMember.group_id == group_id)).all(): session.delete(row)
     session.delete(group); audit(session, request, "group_deleted", user.id, "group", group_id); session.commit()
+    return Response(status_code=204)
+
+
+
+@app.get("/api/v1/groups/{group_id}/members")
+def list_group_members(group_id: str, user: User = Depends(current_user), session: Session = Depends(get_session)):
+    group = session.get(CampusGroup, group_id)
+    if not group or not member_for(session, group_id, user.id):
+        raise HTTPException(404, "Group not found")
+    members = session.exec(select(GroupMember).where(GroupMember.group_id == group_id)).all()
+    result = []
+    for member in members:
+        person = session.get(User, member.user_id)
+        if person:
+            result.append({"user_id": person.id, "name": person.name, "email": person.email,
+                           "can_create": member.can_create, "can_edit": member.can_edit, "can_assign": member.can_assign})
+    return result
+
+
+@app.post("/api/v1/groups/{group_id}/members/{member_id}", status_code=201)
+def add_group_member(group_id: str, member_id: str, user: User = Depends(current_user), session: Session = Depends(get_session)):
+    group = session.get(CampusGroup, group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+    if group.owner_id != user.id:
+        raise HTTPException(403, "Only the group owner can manage members")
+    target = session.get(User, member_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    if member_for(session, group_id, member_id):
+        raise HTTPException(409, "User is already a group member")
+    membership = GroupMember(group_id=group_id, user_id=member_id)
+    session.add(membership)
+    session.commit()
+    return {"group_id": group_id, "user_id": member_id, "can_create": False, "can_edit": False, "can_assign": False}
+
+
+@app.post("/api/v1/admin/users/bulk-ban")
+def bulk_ban_users(payload: dict, request: Request, user: User = Depends(require_admin), session: Session = Depends(get_session)):
+    ids = payload.get("user_ids", [])
+    reason = str(payload.get("reason", "Bulk administrative moderation")).strip()
+    if not isinstance(ids, list) or len(ids) > 100 or len(reason) < 3:
+        raise HTTPException(422, "Provide up to 100 user IDs and a reason")
+    changed = 0
+    for target_id in set(ids):
+        if target_id == user.id:
+            continue
+        target = session.get(User, str(target_id))
+        if not target or target.role == "admin":
+            continue
+        target.is_banned = True
+        target.ban_reason = reason[:500]
+        session.add(target)
+        for active in session.exec(select(RefreshSession).where(RefreshSession.user_id == target.id, RefreshSession.revoked_at == None)).all():
+            active.revoked_at = now()
+            session.add(active)
+        audit(session, request, "user_banned", user.id, "user", target.id, reason[:500])
+        changed += 1
+    session.commit()
+    return {"updated": changed}
+
+
+@app.post("/api/v1/admin/users/bulk-unban")
+def bulk_unban_users(payload: dict, request: Request, user: User = Depends(require_admin), session: Session = Depends(get_session)):
+    ids = payload.get("user_ids", [])
+    if not isinstance(ids, list) or len(ids) > 100:
+        raise HTTPException(422, "Provide up to 100 user IDs")
+    changed = 0
+    for target_id in set(ids):
+        target = session.get(User, str(target_id))
+        if target and target.is_banned:
+            target.is_banned = False
+            target.ban_reason = None
+            session.add(target)
+            audit(session, request, "user_unbanned", user.id, "user", target.id)
+            changed += 1
+    session.commit()
+    return {"updated": changed}
+
+
+@app.post("/api/v1/admin/complaints/bulk-delete")
+def bulk_delete_complaints(payload: dict, request: Request, user: User = Depends(require_admin), session: Session = Depends(get_session)):
+    ids = payload.get("complaint_ids", [])
+    if not isinstance(ids, list) or len(ids) > 100:
+        raise HTTPException(422, "Provide up to 100 complaint IDs")
+    deleted = 0
+    for complaint_id in set(ids):
+        item = session.get(Complaint, complaint_id)
+        if item:
+            audit(session, request, "complaint_deleted", user.id, "complaint", str(item.id))
+            session.delete(item)
+            deleted += 1
+    session.commit()
+    return {"deleted": deleted}
+
+
+@app.post("/api/v1/admin/sessions/{session_id}/revoke", status_code=204)
+def admin_revoke_session(session_id: str, request: Request, user: User = Depends(require_admin), session: Session = Depends(get_session)):
+    item = session.get(RefreshSession, session_id)
+    if not item:
+        raise HTTPException(404, "Session not found")
+    item.revoked_at = now()
+    session.add(item)
+    audit(session, request, "session_revoked_by_admin", user.id, "session", session_id)
+    session.commit()
     return Response(status_code=204)
