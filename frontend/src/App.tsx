@@ -298,7 +298,7 @@ function AdminDashboard() {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load admin data") }
     finally { setBusy(false) }
   }
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load() }, [userOffset])
   async function act(userId:number, action:"ban"|"unban"|"promote"|"demote") {
     try {
       if(action==="ban") await api(`/api/v1/admin/users/${userId}/ban`, {method:"POST",body:JSON.stringify({reason})})
