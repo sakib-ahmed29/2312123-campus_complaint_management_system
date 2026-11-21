@@ -273,12 +273,15 @@ function AdminDashboard() {
   async function load() {
     setBusy(true); setError("")
     try {
-      const [s, u, a] = await Promise.all([
+      const [s, u, a, r, g, sec] = await Promise.all([
         api<Record<string,number>>("/api/v1/admin/stats"),
         api<typeof users>(`/api/v1/admin/users?q=${encodeURIComponent(query)}&limit=50`),
         api<typeof activity>("/api/v1/admin/activity?limit=30"),
+        api<typeof records>("/api/v1/admin/records?limit=100"),
+        api<typeof groups>("/api/v1/admin/groups"),
+        api<typeof security>("/api/v1/admin/security"),
       ])
-      setStats(s); setUsers(u); setActivity(a)
+      setStats(s); setUsers(u); setActivity(a); setRecords(r); setGroups(g); setSecurity(sec)
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load admin data") }
     finally { setBusy(false) }
   }
