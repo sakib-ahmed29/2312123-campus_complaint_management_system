@@ -466,6 +466,29 @@ def revoke_session(session_id: int, user: Annotated[User, Depends(current_user)]
     return Response(status_code=204)
 
 
+@app.patch("/api/v1/users/me/role")
+def leave_admin_role(request: Request, response: Response,
+                     user: Annotated[User, Depends(current_user)],
+                     session: Annotated[Session, Depends(get_session)]):
+    if user.role != "admin":
+        raise HTTPException(403, "Only administrators can use this action")
+    admin_count = len(session.exec(select(User).where(User.role == "admin")).all())
+    if admin_count <= 1:
+        raise HTTPException(409, "You are the last administrator. Assign another admin before leaving the admin role.")
+    user.role = "user"
+    user.token_version += 1
+    user.updated_at = now()
+    for token in session.exec(select(RefreshSession).where(
+        RefreshSession.user_id == user.id, RefreshSession.revoked_at == None
+    )).all():
+        token.revoked_at = now()
+    log_event(session, request, "self_role_change", user.id, "user", str(user.id), "admin -> user")
+    session.add(user)
+    session.commit()
+    response.delete_cookie(COOKIE_NAME, path="/api/v1/auth")
+    return {"id": user.id, "role": user.role}
+
+
 @app.get("/api/v1/users/me")
 def get_profile(user: Annotated[User, Depends(current_user)]):
     return {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role,
