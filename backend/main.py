@@ -36,7 +36,7 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
-engine_args = {"connect_args": {"check_same_thread": False} if IS_SQLITE else {}}
+engine_args = {"connect_args": {"check_same_thread": False} if IS_SQLITE else {"prepare_threshold": None}}
 if not IS_SQLITE:
     engine_args["poolclass"] = NullPool
 engine = create_engine(DATABASE_URL, **engine_args)
@@ -402,6 +402,8 @@ def revoke_session(session_id: int, user: Annotated[User, Depends(current_user)]
     if not row or row.user_id != user.id:
         raise HTTPException(404, "Session not found")
     row.revoked_at = now()
+    user.token_version += 1
+    session.add(user)
     session.commit()
     return Response(status_code=204)
 
