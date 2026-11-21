@@ -318,7 +318,7 @@ function WorkspaceTools() {
   const [permissions,setPermissions]=useState({can_create:false,can_edit:false,can_assign:false})
   const [recordTitle,setRecordTitle]=useState("")
   const [recordBody,setRecordBody]=useState("")
-  const [profile,setProfile]=useState<{email:string;full_name:string}|null>(null)
+  const [profile,setProfile]=useState<{id:number;email:string;full_name:string}|null>(null)
   const [newEmail,setNewEmail]=useState("")
   const [newName,setNewName]=useState("")
   const [currentPassword,setCurrentPassword]=useState("")
