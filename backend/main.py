@@ -970,8 +970,11 @@ def admin_delete_record(record_id: int, request: Request,
 
 @app.get("/api/v1/admin/groups")
 def admin_groups(admin: Annotated[User, Depends(require_role("admin"))],
-                 session: Annotated[Session, Depends(get_session)]):
-    return [group_out(row) for row in session.exec(select(Group).order_by(Group.created_at.desc())).all()]
+                 session: Annotated[Session, Depends(get_session)], q: str = ""):
+    statement = select(Group)
+    if q:
+        statement = statement.where(Group.name.contains(q))
+    return [group_out(row) for row in session.exec(statement.order_by(Group.created_at.desc())).all()]
 
 
 @app.delete("/api/v1/admin/groups/{group_id}", status_code=204)
