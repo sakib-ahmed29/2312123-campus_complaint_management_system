@@ -830,7 +830,7 @@ def create_group_record(group_id: int, payload: GroupRecordCreate, user: Annotat
     session.add(record)
     session.commit()
     session.refresh(record)
-    return record
+    return record_out(record)
 
 
 @app.get("/api/v1/groups/{group_id}/records")
