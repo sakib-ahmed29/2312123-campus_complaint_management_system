@@ -879,11 +879,14 @@ def update_group_record(group_id: int, record_id: int, payload: GroupRecordUpdat
     record = session.get(GroupRecord, record_id)
     if not record or record.group_id != group_id:
         raise HTTPException(404, "Record not found")
-    if group.owner_id != user.id and not member.can_edit:
-        raise HTTPException(403, "Group edit permission required")
     changes = payload.model_dump(exclude_unset=True)
-    if "assignee_id" in changes and group.owner_id != user.id and not member.can_assign:
-        raise HTTPException(403, "Group assign permission required")
+    if not changes:
+        raise HTTPException(422, "Provide at least one field to update")
+    if group.owner_id != user.id:
+        if any(field in changes for field in ("title", "body")) and not member.can_edit:
+            raise HTTPException(403, "Group edit permission required")
+        if "assignee_id" in changes and not member.can_assign:
+            raise HTTPException(403, "Group assign permission required")
     if "assignee_id" in changes and changes["assignee_id"] is not None:
         assigned_member = session.exec(select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == changes["assignee_id"])).first()
         if not assigned_member:
