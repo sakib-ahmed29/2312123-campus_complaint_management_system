@@ -263,6 +263,9 @@ function AdminDashboard() {
   const [stats, setStats] = useState<Record<string, number> | null>(null)
   const [users, setUsers] = useState<Array<{id:number;email:string;full_name:string;role:string;is_banned:boolean}>>([])
   const [activity, setActivity] = useState<Array<{id:number;event:string;user_id:number|null;created_at:string;detail:string|null}>>([])
+  const [records,setRecords]=useState<Array<{id:number;title:string;category:string;status:string;owner_id:number|null}>>([])
+  const [groups,setGroups]=useState<Array<{id:number;name:string;owner_id:number}>>([])
+  const [security,setSecurity]=useState<{failed_logins_last_7_days:number;by_ip:Record<string,number>;by_account:Record<string,number>}|null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [reason, setReason] = useState("Policy violation")
@@ -301,6 +304,13 @@ function AdminDashboard() {
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>ID</th><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       {users.map(u=><tr key={u.id}><td>{u.id}</td><td>{u.full_name}<br/><small>{u.email}</small></td><td>{u.role}</td><td>{u.is_banned?"Banned":"Active"}</td><td style={{display:"flex",gap:6,flexWrap:"wrap"}}>{u.role==="user" && <button className="button secondary" onClick={()=>void act(u.id,"promote")}>Make admin</button>}{u.role==="user" && (u.is_banned?<button className="button secondary" onClick={()=>void act(u.id,"unban")}>Unban</button>:<button className="button danger-ghost" onClick={()=>void act(u.id,"ban")}>Ban</button>)}</td></tr>)}
     </tbody></table></div>
+    <h3 style={{marginTop:28}}>Content moderation</h3>
+    <h4>Complaints</h4>
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Status</th><th>Action</th></tr></thead><tbody>{records.map(r=><tr key={r.id}><td>{r.id}</td><td>{r.title}</td><td>{r.category}</td><td>{r.status}</td><td><button className="button danger-ghost" onClick={async()=>{if(confirm("Delete this complaint permanently?")){try{await api(`/api/v1/admin/records/${r.id}`,{method:"DELETE"});await load()}catch(e){setError(e instanceof Error?e.message:"Delete failed")}}}}>Delete</button></td></tr>)}</tbody></table></div>
+    <h4 style={{marginTop:20}}>Shared groups</h4>
+    {groups.map(g=><div key={g.id} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #eee"}}><span>{g.name} · owner #{g.owner_id}</span><button className="button danger-ghost" onClick={async()=>{if(confirm("Delete this group and its shared records?")){try{await api(`/api/v1/admin/groups/${g.id}`,{method:"DELETE"});await load()}catch(e){setError(e instanceof Error?e.message:"Delete failed")}}}}>Delete group</button></div>)}
+    <h3 style={{marginTop:28}}>Security monitoring</h3>
+    {security&&<><p>Failed logins in last 7 days: <strong>{security.failed_logins_last_7_days}</strong></p><p>By IP: {Object.entries(security.by_ip).map(([ip,n])=>`${ip} (${n})`).join(", ")||"No failed logins"}</p><p>By account: {Object.entries(security.by_account).map(([email,n])=>`${email} (${n})`).join(", ")||"No failed logins"}</p></>}
     <h3 style={{marginTop:28}}>Recent activity</h3>
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Event</th><th>User ID</th><th>Details</th><th>Time</th></tr></thead><tbody>{activity.map(a=><tr key={a.id}><td>{a.event}</td><td>{a.user_id??"—"}</td><td>{a.detail??"—"}</td><td>{new Date(a.created_at).toLocaleString()}</td></tr>)}</tbody></table></div>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:18}}>{["users","records","activity"].map(k=><a key={k} className="button secondary" href={`/api/v1/admin/export/${k}`} onClick={async e=>{e.preventDefault();try{const data=await api<string>(`/api/v1/admin/export/${k}`);const blob=new Blob([data],{type:"text/csv"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`campuscare-${k}.csv`;link.click();URL.revokeObjectURL(url)}catch(err){setError(err instanceof Error?err.message:"Export failed")}}}>Export {k} CSV</a>)}</div>
