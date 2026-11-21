@@ -989,3 +989,38 @@ def admin_delete_group(group_id: int, request: Request,
     session.delete(group)
     session.commit()
     return Response(status_code=204)
+
+
+@app.post("/api/v1/admin/records/bulk-delete")
+def admin_bulk_delete_records(payload: list[int], request: Request,
+                              admin: Annotated[User, Depends(require_role("admin"))],
+                              session: Annotated[Session, Depends(get_session)]):
+    deleted = []
+    for record_id in set(payload):
+        record = session.get(Complaint, record_id)
+        if record:
+            log_event(session, request, "admin_record_delete", admin.id, "complaint", str(record_id))
+            session.delete(record)
+            deleted.append(record_id)
+    session.commit()
+    return {"deleted_ids": deleted}
+
+
+@app.post("/api/v1/admin/groups/bulk-delete")
+def admin_bulk_delete_groups(payload: list[int], request: Request,
+                             admin: Annotated[User, Depends(require_role("admin"))],
+                             session: Annotated[Session, Depends(get_session)]):
+    deleted = []
+    for group_id in set(payload):
+        group = session.get(Group, group_id)
+        if not group:
+            continue
+        for record in session.exec(select(GroupRecord).where(GroupRecord.group_id == group_id)).all():
+            session.delete(record)
+        for member in session.exec(select(GroupMember).where(GroupMember.group_id == group_id)).all():
+            session.delete(member)
+        log_event(session, request, "admin_group_delete", admin.id, "group", str(group_id))
+        session.delete(group)
+        deleted.append(group_id)
+    session.commit()
+    return {"deleted_ids": deleted}
