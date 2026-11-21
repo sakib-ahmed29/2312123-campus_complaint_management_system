@@ -601,7 +601,7 @@ def admin_stats(admin: Annotated[User, Depends(require_permission("admin:access"
 
 
 @app.get("/api/v1/admin/users")
-def admin_users(admin: Annotated[User, Depends(require_role("admin"))],
+def admin_users(admin: Annotated[User, Depends(require_permission("admin:access"))],
                 session: Annotated[Session, Depends(get_session)], q: str = "", role: str | None = None,
                 status: str | None = None, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100)):
     statement = select(User)
@@ -619,7 +619,7 @@ def admin_users(admin: Annotated[User, Depends(require_role("admin"))],
 
 
 @app.get("/api/v1/admin/users/{user_id}")
-def admin_user_detail(user_id: int, admin: Annotated[User, Depends(require_role("admin"))],
+def admin_user_detail(user_id: int, admin: Annotated[User, Depends(require_permission("admin:access"))],
                       session: Annotated[Session, Depends(get_session)]):
     target = session.get(User, user_id)
     if not target:
@@ -638,7 +638,7 @@ def admin_user_detail(user_id: int, admin: Annotated[User, Depends(require_role(
 
 @app.patch("/api/v1/admin/users/{user_id}/role")
 def admin_change_role(user_id: int, payload: RoleChange, request: Request,
-                      admin: Annotated[User, Depends(require_role("admin"))], session: Annotated[Session, Depends(get_session)]):
+                      admin: Annotated[User, Depends(require_permission("admin:access"))], session: Annotated[Session, Depends(get_session)]):
     if payload.role not in ("user", "admin"):
         raise HTTPException(422, "Role must be user or admin")
     if user_id == admin.id:
@@ -657,7 +657,7 @@ def admin_change_role(user_id: int, payload: RoleChange, request: Request,
 
 @app.post("/api/v1/admin/users/{user_id}/ban")
 def admin_ban_user(user_id: int, payload: BanRequest, request: Request,
-                   admin: Annotated[User, Depends(require_role("admin"))], session: Annotated[Session, Depends(get_session)]):
+                   admin: Annotated[User, Depends(require_permission("admin:access"))], session: Annotated[Session, Depends(get_session)]):
     target = session.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
@@ -673,7 +673,7 @@ def admin_ban_user(user_id: int, payload: BanRequest, request: Request,
 
 
 @app.post("/api/v1/admin/users/{user_id}/unban")
-def admin_unban_user(user_id: int, payload: UnbanRequest, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+def admin_unban_user(user_id: int, payload: UnbanRequest, request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
                      session: Annotated[Session, Depends(get_session)]):
     target = session.get(User, user_id)
     if not target:
@@ -685,7 +685,7 @@ def admin_unban_user(user_id: int, payload: UnbanRequest, request: Request, admi
 
 
 @app.post("/api/v1/admin/users/bulk-ban")
-def bulk_ban(payload: list[int], request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+def bulk_ban(payload: list[int], request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
               session: Annotated[Session, Depends(get_session)], reason: str = Query(min_length=3, max_length=500)):
     updated = []
     for user_id in set(payload):
@@ -702,7 +702,7 @@ def bulk_ban(payload: list[int], request: Request, admin: Annotated[User, Depend
 
 
 @app.get("/api/v1/admin/activity")
-def admin_activity(admin: Annotated[User, Depends(require_role("admin"))],
+def admin_activity(admin: Annotated[User, Depends(require_permission("admin:access"))],
                    session: Annotated[Session, Depends(get_session)], q: str = "", event: str | None = None,
                    user_id: int | None = None, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
     statement = select(AuditEvent)
@@ -717,7 +717,7 @@ def admin_activity(admin: Annotated[User, Depends(require_role("admin"))],
 
 
 @app.get("/api/v1/admin/security")
-def admin_security(admin: Annotated[User, Depends(require_role("admin"))],
+def admin_security(admin: Annotated[User, Depends(require_permission("admin:access"))],
                    session: Annotated[Session, Depends(get_session)]):
     cutoff = now() - timedelta(days=7)
     attempts = session.exec(select(LoginAttempt).where(LoginAttempt.succeeded == False, LoginAttempt.created_at >= cutoff)).all()
@@ -730,7 +730,7 @@ def admin_security(admin: Annotated[User, Depends(require_role("admin"))],
 
 
 @app.get("/api/v1/admin/export/{kind}")
-def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
                  session: Annotated[Session, Depends(get_session)], status: str | None = None,
                  role: str | None = None, q: str = "", event: str | None = None):
     output = io.StringIO()
@@ -914,7 +914,7 @@ def remove_group_member(group_id: int, member_user_id: int, user: Annotated[User
 
 
 @app.post("/api/v1/admin/users/bulk-unban")
-def bulk_unban(payload: list[int], request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+def bulk_unban(payload: list[int], request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
                 session: Annotated[Session, Depends(get_session)], reason: str = Query(min_length=3, max_length=500)):
     updated = []
     for user_id in set(payload):
@@ -928,7 +928,7 @@ def bulk_unban(payload: list[int], request: Request, admin: Annotated[User, Depe
 
 
 @app.post("/api/v1/admin/users/{user_id}/revoke-sessions")
-def admin_revoke_sessions(user_id: int, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+def admin_revoke_sessions(user_id: int, request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
                           session: Annotated[Session, Depends(get_session)]):
     target = session.get(User, user_id)
     if not target:
@@ -945,7 +945,7 @@ def admin_revoke_sessions(user_id: int, request: Request, admin: Annotated[User,
 
 
 @app.get("/api/v1/admin/records")
-def admin_records(admin: Annotated[User, Depends(require_role("admin"))],
+def admin_records(admin: Annotated[User, Depends(require_permission("admin:access"))],
                   session: Annotated[Session, Depends(get_session)], status: str | None = None,
                   category: str | None = None, offset: int = Query(0, ge=0),
                   limit: int = Query(50, ge=1, le=200)):
@@ -960,7 +960,7 @@ def admin_records(admin: Annotated[User, Depends(require_role("admin"))],
 
 @app.delete("/api/v1/admin/records/{record_id}", status_code=204)
 def admin_delete_record(record_id: int, request: Request,
-                        admin: Annotated[User, Depends(require_role("admin"))],
+                        admin: Annotated[User, Depends(require_permission("admin:access"))],
                         session: Annotated[Session, Depends(get_session)]):
     record = session.get(Complaint, record_id)
     if not record:
@@ -972,7 +972,7 @@ def admin_delete_record(record_id: int, request: Request,
 
 
 @app.get("/api/v1/admin/groups")
-def admin_groups(admin: Annotated[User, Depends(require_role("admin"))],
+def admin_groups(admin: Annotated[User, Depends(require_permission("admin:access"))],
                  session: Annotated[Session, Depends(get_session)], q: str = ""):
     statement = select(Group)
     if q:
@@ -982,7 +982,7 @@ def admin_groups(admin: Annotated[User, Depends(require_role("admin"))],
 
 @app.delete("/api/v1/admin/groups/{group_id}", status_code=204)
 def admin_delete_group(group_id: int, request: Request,
-                       admin: Annotated[User, Depends(require_role("admin"))],
+                       admin: Annotated[User, Depends(require_permission("admin:access"))],
                        session: Annotated[Session, Depends(get_session)]):
     group = session.get(Group, group_id)
     if not group:
@@ -999,7 +999,7 @@ def admin_delete_group(group_id: int, request: Request,
 
 @app.post("/api/v1/admin/records/bulk-delete")
 def admin_bulk_delete_records(payload: list[int], request: Request,
-                              admin: Annotated[User, Depends(require_role("admin"))],
+                              admin: Annotated[User, Depends(require_permission("admin:access"))],
                               session: Annotated[Session, Depends(get_session)]):
     deleted = []
     for record_id in set(payload):
@@ -1014,7 +1014,7 @@ def admin_bulk_delete_records(payload: list[int], request: Request,
 
 @app.post("/api/v1/admin/groups/bulk-delete")
 def admin_bulk_delete_groups(payload: list[int], request: Request,
-                             admin: Annotated[User, Depends(require_role("admin"))],
+                             admin: Annotated[User, Depends(require_permission("admin:access"))],
                              session: Annotated[Session, Depends(get_session)]):
     deleted = []
     for group_id in set(payload):
