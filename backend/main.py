@@ -62,6 +62,7 @@ class User(SQLModel, table=True):
     password_hash: str
     role: str = Field(default="user", index=True, max_length=10)
     is_banned: bool = Field(default=False, index=True)
+    token_version: int = 0
     ban_reason: str | None = None
     created_at: datetime = Field(default_factory=now, index=True)
     updated_at: datetime = Field(default_factory=now)
@@ -234,7 +235,7 @@ def make_access(user: User) -> str:
     issued = now()
     return jwt.encode({"sub": str(user.id), "role": user.role, "iat": issued,
                        "exp": issued + timedelta(minutes=ACCESS_MINUTES),
-                       "jti": secrets.token_hex(12)}, JWT_SECRET, algorithm="HS256")
+                       "jti": secrets.token_hex(12), "ver": user.token_version}, JWT_SECRET, algorithm="HS256")
 
 
 def issue_refresh(session: Session, user: User, request: Request, response: Response) -> None:
@@ -265,7 +266,7 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     except (jwt.PyJWTError, KeyError, ValueError):
         raise HTTPException(401, "Invalid or expired access token")
     user = session.get(User, user_id)
-    if not user or user.is_banned:
+    if not user or user.is_banned or claims.get("ver", 0) != user.token_version:
         raise HTTPException(401, "Session is not valid")
     return user
 
@@ -329,13 +330,13 @@ def login(payload: Login, request: Request, response: Response, session: Annotat
     email = payload.email.strip().lower()
     ip = request.client.host if request.client else "unknown"
     cutoff = now() - timedelta(minutes=15)
-    attempts = session.exec(select(LoginAttempt).where(LoginAttempt.email_key == digest(email),
+    attempts = session.exec(select(LoginAttempt).where(LoginAttempt.email_key == email,
         LoginAttempt.ip_address == ip, LoginAttempt.created_at >= cutoff, LoginAttempt.succeeded == False)).all()
     if len(attempts) >= 8:
         raise HTTPException(429, "Too many failed login attempts. Try again in 15 minutes.")
     user = session.exec(select(User).where(User.email == email)).first()
     valid = bool(user and verify_password(payload.password, user.password_hash))
-    session.add(LoginAttempt(email_key=digest(email), ip_address=ip, succeeded=valid))
+    session.add(LoginAttempt(email_key=email, ip_address=ip, succeeded=valid))
     if not valid or not user or user.is_banned:
         log_event(session, request, "failed_login", user.id if user else None, detail="Invalid credentials or banned account")
         session.commit()
@@ -377,6 +378,8 @@ def logout(request: Request, response: Response, session: Annotated[Session, Dep
         token = session.exec(select(RefreshSession).where(RefreshSession.token_hash == digest(raw))).first()
         if token and token.user_id == user.id:
             token.revoked_at = now()
+    user.token_version += 1
+    session.add(user)
     log_event(session, request, "logout", user.id)
     session.commit()
     response.delete_cookie(COOKIE_NAME, path="/api/v1/auth")
@@ -433,6 +436,8 @@ def change_password(payload: PasswordChange, request: Request, response: Respons
     if len(payload.new_password) < 8 or not any(c.isalpha() for c in payload.new_password) or not any(c.isdigit() for c in payload.new_password):
         raise HTTPException(422, "New password must contain a letter and a number")
     user.password_hash = hash_password(payload.new_password)
+    user.token_version += 1
+    session.add(user)
     for token in session.exec(select(RefreshSession).where(RefreshSession.user_id == user.id, RefreshSession.revoked_at == None)).all():
         token.revoked_at = now()
     log_event(session, request, "password_change", user.id)
@@ -597,6 +602,7 @@ def admin_change_role(user_id: int, payload: RoleChange, request: Request,
     if target.role == "admin":
         raise HTTPException(403, "An administrator cannot change another administrator's role")
     target.role = payload.role
+    target.token_version += 1
     log_event(session, request, "role_change", admin.id, "user", str(user_id), payload.role)
     session.commit()
     return {"id": target.id, "role": target.role}
@@ -611,6 +617,7 @@ def admin_ban_user(user_id: int, payload: BanRequest, request: Request,
     if target.id == admin.id or target.role == "admin":
         raise HTTPException(403, "Admins cannot ban themselves or another admin")
     target.is_banned, target.ban_reason = True, payload.reason
+    target.token_version += 1
     for token in session.exec(select(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked_at == None)).all():
         token.revoked_at = now()
     log_event(session, request, "user_banned", admin.id, "user", str(user_id), payload.reason)
@@ -638,6 +645,7 @@ def bulk_ban(payload: list[int], request: Request, admin: Annotated[User, Depend
         target = session.get(User, user_id)
         if target and target.role != "admin" and target.id != admin.id:
             target.is_banned, target.ban_reason = True, reason
+            target.token_version += 1
             for token in session.exec(select(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked_at == None)).all():
                 token.revoked_at = now()
             log_event(session, request, "user_banned", admin.id, "user", str(user_id), reason)
@@ -668,7 +676,7 @@ def admin_security(admin: Annotated[User, Depends(require_role("admin"))],
     for attempt in attempts:
         by_ip[attempt.ip_address] = by_ip.get(attempt.ip_address, 0) + 1
         by_account[attempt.email_key] = by_account.get(attempt.email_key, 0) + 1
-    return {"failed_logins_last_7_days": len(attempts), "by_ip": by_ip, "by_account_hash": by_account}
+    return {"failed_logins_last_7_days": len(attempts), "by_ip": by_ip, "by_account": by_account}
 
 
 @app.get("/api/v1/admin/export/{kind}")
@@ -858,6 +866,8 @@ def admin_revoke_sessions(user_id: int, request: Request, admin: Annotated[User,
         RefreshSession.revoked_at == None)).all()
     for row in rows:
         row.revoked_at = now()
+    target.token_version += 1
+    session.add(target)
     log_event(session, request, "sessions_revoked", admin.id, "user", str(user_id), f"{len(rows)} sessions")
     session.commit()
     return {"revoked_sessions": len(rows)}
