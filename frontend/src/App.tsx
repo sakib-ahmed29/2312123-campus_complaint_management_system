@@ -57,6 +57,8 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new Error(message)
   }
   if (response.status === 204) return undefined as T
+  const contentType = response.headers.get("content-type") || ""
+  if (contentType.includes("text/csv") || contentType.startsWith("text/")) return await response.text() as T
   return response.json() as Promise<T>
 }
 
@@ -240,7 +242,7 @@ function ComplaintWorkspace() {
         </section>
       </div>
 
-      <section className="panel form-panel">
+      {currentRole === "user" && <section className="panel form-panel">
         <div className="panel-heading"><div><p className="eyebrow">{editingId ? `EDIT COMPLAINT #${editingId}` : "HAVE SOMETHING TO REPORT?"}</p><h2>{editingId ? "Update your complaint" : "Submit a complaint"}</h2></div><span className="form-step">01 / 01</span></div>
         <form onSubmit={submitComplaint}>
           <div className="form-grid">
@@ -250,8 +252,8 @@ function ComplaintWorkspace() {
           </div>
           <div className="form-footer"><p>Your complaint will be created with <strong>Pending</strong> status.</p><div>{editingId && <button type="button" className="button secondary" onClick={startCreate}>Cancel edit</button>}<button className="button primary" type="submit" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes →" : "Submit complaint →"}</button></div></div>
         </form>
-      </section>
-      <footer><span>CampusCare · MVP demonstration</span><span>Built for Independent University, Bangladesh</span><a href="/api/docs" target="_blank" rel="noreferrer">API documentation ↗</a></footer>
+      </section>}
+      <footer><span>CampusCare · Secure workspace</span><span>Built for Independent University, Bangladesh</span><a href="/api/docs" target="_blank" rel="noreferrer">API documentation ↗</a></footer>
     </main>
   )
 }
