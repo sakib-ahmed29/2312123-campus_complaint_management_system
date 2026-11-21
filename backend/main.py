@@ -832,3 +832,81 @@ def remove_group_member(group_id: int, member_user_id: int, user: Annotated[User
     session.delete(member)
     session.commit()
     return Response(status_code=204)
+
+
+@app.post("/api/v1/admin/users/bulk-unban")
+def bulk_unban(payload: list[int], request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+                session: Annotated[Session, Depends(get_session)]):
+    updated = []
+    for user_id in set(payload):
+        target = session.get(User, user_id)
+        if target and target.role == "user" and target.is_banned:
+            target.is_banned, target.ban_reason = False, None
+            log_event(session, request, "user_unbanned", admin.id, "user", str(user_id))
+            updated.append(user_id)
+    session.commit()
+    return {"updated_user_ids": updated}
+
+
+@app.post("/api/v1/admin/users/{user_id}/revoke-sessions")
+def admin_revoke_sessions(user_id: int, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+                          session: Annotated[Session, Depends(get_session)]):
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    rows = session.exec(select(RefreshSession).where(RefreshSession.user_id == user_id,
+        RefreshSession.revoked_at == None)).all()
+    for row in rows:
+        row.revoked_at = now()
+    log_event(session, request, "sessions_revoked", admin.id, "user", str(user_id), f"{len(rows)} sessions")
+    session.commit()
+    return {"revoked_sessions": len(rows)}
+
+
+@app.get("/api/v1/admin/records")
+def admin_records(admin: Annotated[User, Depends(require_role("admin"))],
+                  session: Annotated[Session, Depends(get_session)], status: str | None = None,
+                  category: str | None = None, offset: int = Query(0, ge=0),
+                  limit: int = Query(50, ge=1, le=200)):
+    statement = select(Complaint)
+    if status:
+        statement = statement.where(Complaint.status == status)
+    if category:
+        statement = statement.where(Complaint.category == category)
+    return session.exec(statement.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)).all()
+
+
+@app.delete("/api/v1/admin/records/{record_id}", status_code=204)
+def admin_delete_record(record_id: int, request: Request,
+                        admin: Annotated[User, Depends(require_role("admin"))],
+                        session: Annotated[Session, Depends(get_session)]):
+    record = session.get(Complaint, record_id)
+    if not record:
+        raise HTTPException(404, "Record not found")
+    log_event(session, request, "admin_record_delete", admin.id, "complaint", str(record_id))
+    session.delete(record)
+    session.commit()
+    return Response(status_code=204)
+
+
+@app.get("/api/v1/admin/groups")
+def admin_groups(admin: Annotated[User, Depends(require_role("admin"))],
+                 session: Annotated[Session, Depends(get_session)]):
+    return session.exec(select(Group).order_by(Group.created_at.desc())).all()
+
+
+@app.delete("/api/v1/admin/groups/{group_id}", status_code=204)
+def admin_delete_group(group_id: int, request: Request,
+                       admin: Annotated[User, Depends(require_role("admin"))],
+                       session: Annotated[Session, Depends(get_session)]):
+    group = session.get(Group, group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+    for row in session.exec(select(GroupRecord).where(GroupRecord.group_id == group_id)).all():
+        session.delete(row)
+    for row in session.exec(select(GroupMember).where(GroupMember.group_id == group_id)).all():
+        session.delete(row)
+    log_event(session, request, "admin_group_delete", admin.id, "group", str(group_id))
+    session.delete(group)
+    session.commit()
+    return Response(status_code=204)
