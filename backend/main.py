@@ -28,6 +28,11 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return forwarded or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     DATABASE_URL = f"sqlite:///{'/tmp/ccms.db' if os.getenv('VERCEL') else 'ccms.db'}"
@@ -168,6 +173,10 @@ class BanRequest(SQLModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
+class UnbanRequest(SQLModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class ComplaintCreate(SQLModel):
     title: str = Field(min_length=5, max_length=100)
     description: str = Field(min_length=10, max_length=2000)
@@ -270,7 +279,7 @@ def issue_refresh(session: Session, user: User, request: Request, response: Resp
     raw = secrets.token_urlsafe(48)
     row = RefreshSession(user_id=user.id, token_hash=digest(raw),
                          expires_at=now() + timedelta(days=REFRESH_DAYS),
-                         ip_address=request.client.host if request.client else None,
+                         ip_address=client_ip(request),
                          user_agent=request.headers.get("user-agent"))
     session.add(row)
     response.set_cookie(COOKIE_NAME, raw, httponly=True, secure=COOKIE_SECURE,
@@ -323,8 +332,8 @@ async def lifespan(_: FastAPI):
     if "owner_id" not in columns:
         with engine.begin() as connection:
             connection.execute(text('ALTER TABLE complaint ADD COLUMN owner_id INTEGER REFERENCES "user"(id)'))
-    if os.getenv("VERCEL") and (not os.getenv("JWT_SECRET") or not os.getenv("PASSWORD_PEPPER")):
-        raise RuntimeError("JWT_SECRET and PASSWORD_PEPPER must be configured in Vercel")
+    if os.getenv("VERCEL") and (not os.getenv("DATABASE_URL") or not os.getenv("JWT_SECRET") or not os.getenv("PASSWORD_PEPPER")):
+        raise RuntimeError("DATABASE_URL, JWT_SECRET and PASSWORD_PEPPER must be configured in Vercel")
     yield
 
 
@@ -356,7 +365,7 @@ def signup(payload: Signup, request: Request, session: Annotated[Session, Depend
 @app.post("/api/v1/auth/login")
 def login(payload: Login, request: Request, response: Response, session: Annotated[Session, Depends(get_session)]):
     email = payload.email.strip().lower()
-    ip = request.client.host if request.client else "unknown"
+    ip = client_ip(request)
     cutoff = now() - timedelta(minutes=15)
     attempts = session.exec(select(LoginAttempt).where(LoginAttempt.email_key == email,
         LoginAttempt.ip_address == ip, LoginAttempt.created_at >= cutoff, LoginAttempt.succeeded == False)).all()
@@ -661,13 +670,13 @@ def admin_ban_user(user_id: int, payload: BanRequest, request: Request,
 
 
 @app.post("/api/v1/admin/users/{user_id}/unban")
-def admin_unban_user(user_id: int, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+def admin_unban_user(user_id: int, payload: UnbanRequest, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
                      session: Annotated[Session, Depends(get_session)]):
     target = session.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
     target.is_banned, target.ban_reason = False, None
-    log_event(session, request, "user_unbanned", admin.id, "user", str(user_id))
+    log_event(session, request, "user_unbanned", admin.id, "user", str(user_id), payload.reason)
     session.commit()
     return {"id": target.id, "is_banned": False}
 
@@ -903,7 +912,7 @@ def remove_group_member(group_id: int, member_user_id: int, user: Annotated[User
 
 @app.post("/api/v1/admin/users/bulk-unban")
 def bulk_unban(payload: list[int], request: Request, admin: Annotated[User, Depends(require_role("admin"))],
-                session: Annotated[Session, Depends(get_session)]):
+                session: Annotated[Session, Depends(get_session)], reason: str = Query(min_length=3, max_length=500)):
     updated = []
     for user_id in set(payload):
         target = session.get(User, user_id)
