@@ -304,7 +304,12 @@ def log_event(session: Session, request: Request, event: str, user_id: int | Non
 
 
 def account_is_suspended(user: User) -> bool:
-    return user.suspended_until is not None and user.suspended_until > now()
+    deadline = user.suspended_until
+    if deadline is None:
+        return False
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    return deadline > now()
 
 
 def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
