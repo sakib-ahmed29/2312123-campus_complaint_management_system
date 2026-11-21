@@ -523,7 +523,7 @@ def get_complaint(complaint_id: int, user: Annotated[User, Depends(current_user)
 
 
 @app.patch("/api/v1/complaints/{complaint_id}")
-def update_complaint(complaint_id: int, payload: ComplaintUpdate, user: Annotated[User, Depends(require_role("user"))],
+def update_complaint(complaint_id: int, payload: ComplaintUpdate, user: Annotated[User, Depends(require_permission("complaint:update:own"))],
                      session: Annotated[Session, Depends(get_session)]):
     item = owned_complaint(complaint_id, user, session)
     if item.status != "pending":
@@ -586,7 +586,7 @@ def user_dashboard(user: Annotated[User, Depends(current_user)], session: Annota
 
 
 @app.get("/api/v1/admin/stats")
-def admin_stats(admin: Annotated[User, Depends(require_role("admin"))], session: Annotated[Session, Depends(get_session)]):
+def admin_stats(admin: Annotated[User, Depends(require_permission("admin:access"))], session: Annotated[Session, Depends(get_session)]):
     week = now() - timedelta(days=7)
     count_users = session.exec(select(func.count()).select_from(User)).one()
     count_banned = session.exec(select(func.count()).select_from(User).where(User.is_banned == True)).one()
