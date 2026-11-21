@@ -528,7 +528,7 @@ export default function App() {
     <p style={{marginTop:18}}>{mode==="login"?"New to CampusCare?":"Already registered?"} <button className="refresh-link" onClick={()=>{setMode(mode==="login"?"signup":"login");setError("")}}>{mode==="login"?"Create an account":"Sign in"}</button></p>
   </section></main>
 
-  const navItems: {id:"home"|"about"|"complaints"|"profile"|"contact"|"admin";label:string}[] = [
+  const navItems: {id:"home"|"about"|"complaints"|"profile"|"contact"|"admin"|"users";label:string}[] = [
     {id:"home",label:"Home"},{id:"about",label:"About"},{id:"complaints",label:"Complaints"},
     {id:"profile",label:"My Profile"},{id:"contact",label:"Contact"},
     ...(user.role==="admin"?[{id:"admin" as const,label:"Admin"},{id:"users" as const,label:"Users"}]:[]),
