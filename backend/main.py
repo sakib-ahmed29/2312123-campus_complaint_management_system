@@ -9,7 +9,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -50,9 +50,9 @@ COOKIE_NAME = "campuscare_refresh"
 password_hasher = PasswordHash.recommended()
 bearer = HTTPBearer(auto_error=False)
 
-Role = str
-Category = str
-Status = str
+Role = Literal["user", "admin"]
+Category = Literal["academic", "hostel", "library", "cafeteria", "transport", "it_network", "other"]
+Status = Literal["pending", "in_progress", "resolved", "rejected"]
 
 
 class User(SQLModel, table=True):
@@ -171,17 +171,17 @@ class BanRequest(SQLModel):
 class ComplaintCreate(SQLModel):
     title: str = Field(min_length=5, max_length=100)
     description: str = Field(min_length=10, max_length=2000)
-    category: str
+    category: Category
 
 
 class ComplaintUpdate(SQLModel):
     title: str | None = Field(default=None, min_length=5, max_length=100)
     description: str | None = Field(default=None, min_length=10, max_length=2000)
-    category: str | None = None
+    category: Category | None = None
 
 
 class StatusUpdate(SQLModel):
-    status: str
+    status: Status
     admin_response: str | None = Field(default=None, max_length=1000)
 
 
@@ -618,9 +618,10 @@ def admin_user_detail(user_id: int, admin: Annotated[User, Depends(require_role(
     activity = session.exec(select(AuditEvent).where(AuditEvent.user_id == user_id).order_by(AuditEvent.created_at.desc()).limit(30)).all()
     return {"user": {"id": target.id, "email": target.email, "full_name": target.full_name, "role": target.role,
                      "is_banned": target.is_banned, "created_at": target.created_at},
-            "complaints": complaints, "groups": groups,
+            "complaints": [complaint_out(x) for x in complaints],
+            "groups": [group_out(x) for x in groups],
             "sessions": [{"id": x.id, "created_at": x.created_at, "revoked_at": x.revoked_at} for x in sessions],
-            "activity": activity}
+            "activity": [audit_out(x) for x in activity]}
 
 
 @app.patch("/api/v1/admin/users/{user_id}/role")
