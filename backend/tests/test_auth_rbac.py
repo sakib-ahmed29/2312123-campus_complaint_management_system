@@ -129,6 +129,19 @@ def test_group_permissions_are_enforced(client):
     denied = client.patch(f"/api/v1/groups/{group_id}/records/{record.json()['id']}",
                           headers=headers(member_token), json={"body": "Unauthorized edit"})
     assert denied.status_code == 403
+
+    assigner_id = signup(client, "assigner@example.test")
+    assigner_token = login(client, "assigner@example.test")
+    added_assigner = client.post(f"/api/v1/groups/{group_id}/members", headers=headers(owner_token), json={
+        "user_id": assigner_id, "can_create": False, "can_edit": False, "can_assign": True
+    })
+    assert added_assigner.status_code == 200
+    assigned = client.patch(f"/api/v1/groups/{group_id}/records/{record.json()['id']}",
+                            headers=headers(assigner_token), json={"assignee_id": owner_id})
+    assert assigned.status_code == 200
+    edit_denied = client.patch(f"/api/v1/groups/{group_id}/records/{record.json()['id']}",
+                               headers=headers(assigner_token), json={"body": "Still cannot edit"})
+    assert edit_denied.status_code == 403
     assert client.delete(f"/api/v1/groups/{group_id}", headers=headers(member_token)).status_code == 404
 
 
