@@ -288,9 +288,9 @@ function AdminDashboard() {
       const [s, u, a, r, g, sec, me] = await Promise.all([
         api<Record<string,number>>("/api/v1/admin/stats"),
         api<typeof users>(`/api/v1/admin/users?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}&offset=${userOffset}&limit=50`),
-        api<typeof activity>("/api/v1/admin/activity?limit=30"),
-        api<typeof records>("/api/v1/admin/records?limit=100"),
-        api<typeof groups>("/api/v1/admin/groups"),
+        api<typeof activity>(`/api/v1/admin/activity?limit=30&q=${encodeURIComponent(activityQuery)}&event=${activityEvent}`),
+        api<typeof records>(`/api/v1/admin/records?limit=100&status=${recordStatusFilter}`),
+        api<typeof groups>(`/api/v1/admin/groups?q=${encodeURIComponent(groupQuery)}`),
         api<typeof security>("/api/v1/admin/security"),
         api<{id:number}>("/api/v1/users/me"),
       ])
