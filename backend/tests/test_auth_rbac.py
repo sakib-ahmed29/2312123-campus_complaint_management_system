@@ -186,3 +186,43 @@ def test_banned_user_is_rejected_on_the_next_request(client):
                          json={"reason": "Automated security test"})
     assert banned.status_code == 200
     assert client.get("/api/v1/users/me", headers=headers(user_token)).status_code == 401
+
+
+def test_admin_can_suspend_and_restore_a_user_account(client):
+    admin_id = signup(client, "suspension-admin@example.test")
+    signup(client, "suspended-user@example.test")
+    user_token = login(client, "suspended-user@example.test")
+    with Session(engine) as db:
+        admin = db.get(User, admin_id)
+        admin.role = "admin"
+        db.add(admin)
+        db.commit()
+    admin_token = login(client, "suspension-admin@example.test")
+
+    suspended = client.post(
+        "/api/v1/admin/users/2/suspend",
+        headers=headers(admin_token),
+        json={"reason": "Temporary policy review", "hours": 2},
+    )
+    assert suspended.status_code == 200, suspended.text
+    assert suspended.json()["status"] == "suspended"
+    assert client.get("/api/v1/users/me", headers=headers(user_token)).status_code == 401
+    assert client.post("/api/v1/auth/login", json={
+        "email": "suspended-user@example.test", "password": "campus1234"
+    }).status_code == 401
+
+    listing = client.get("/api/v1/admin/users?status=suspended", headers=headers(admin_token))
+    assert listing.status_code == 200
+    assert any(row["email"] == "suspended-user@example.test" and row["status"] == "suspended"
+               for row in listing.json())
+
+    restored = client.post(
+        "/api/v1/admin/users/2/unsuspend",
+        headers=headers(admin_token),
+        json={"reason": "Review completed"},
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "active"
+    assert client.post("/api/v1/auth/login", json={
+        "email": "suspended-user@example.test", "password": "campus1234"
+    }).status_code == 200
