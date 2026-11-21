@@ -226,3 +226,27 @@ def test_admin_can_suspend_and_restore_a_user_account(client):
     assert client.post("/api/v1/auth/login", json={
         "email": "suspended-user@example.test", "password": "campus1234"
     }).status_code == 200
+
+
+
+def test_admin_can_demote_self_when_another_admin_remains(client):
+    first_admin_id = signup(client, "self-demote@example.test")
+    second_admin_id = signup(client, "remaining-admin@example.test")
+    with Session(engine) as db:
+        first_admin = db.get(User, first_admin_id)
+        second_admin = db.get(User, second_admin_id)
+        first_admin.role = "admin"
+        second_admin.role = "admin"
+        db.add(first_admin)
+        db.add(second_admin)
+        db.commit()
+
+    token = login(client, "self-demote@example.test")
+    demoted = client.patch("/api/v1/users/me/role", headers=headers(token))
+    assert demoted.status_code == 200, demoted.text
+    assert demoted.json() == {"id": first_admin_id, "role": "user"}
+    assert client.get("/api/v1/users/me", headers=headers(token)).status_code == 401
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+    with Session(engine) as db:
+        assert db.get(User, first_admin_id).role == "user"
+        assert db.get(User, second_admin_id).role == "admin"
