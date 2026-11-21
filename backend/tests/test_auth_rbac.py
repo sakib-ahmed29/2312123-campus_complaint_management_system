@@ -1,5 +1,9 @@
 import os
 import tempfile
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 DB_FILE = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
 os.environ["DATABASE_URL"] = f"sqlite:///{DB_FILE}"
