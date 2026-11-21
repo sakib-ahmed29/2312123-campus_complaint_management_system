@@ -130,3 +130,46 @@ def test_group_permissions_are_enforced(client):
                           headers=headers(member_token), json={"body": "Unauthorized edit"})
     assert denied.status_code == 403
     assert client.delete(f"/api/v1/groups/{group_id}", headers=headers(member_token)).status_code == 404
+
+
+
+def test_logout_invalidates_access_and_refresh_session(client):
+    signup(client, "logout@example.test")
+    token = login(client, "logout@example.test")
+    assert client.get("/api/v1/users/me", headers=headers(token)).status_code == 200
+    response = client.post("/api/v1/auth/logout", headers=headers(token))
+    assert response.status_code == 204
+    assert client.get("/api/v1/users/me", headers=headers(token)).status_code == 401
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+
+
+def test_refresh_rotation_rejects_reused_refresh_token(client):
+    signup(client, "rotation@example.test")
+    login(client, "rotation@example.test")
+    old_cookie = client.cookies.get("campuscare_refresh")
+    assert old_cookie
+    rotated = client.post("/api/v1/auth/refresh")
+    assert rotated.status_code == 200
+    new_cookie = client.cookies.get("campuscare_refresh")
+    assert new_cookie and new_cookie != old_cookie
+    replay = client.post("/api/v1/auth/refresh", cookies={"campuscare_refresh": old_cookie})
+    assert replay.status_code == 401
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+
+
+def test_banned_user_is_rejected_on_the_next_request(client):
+    admin_id = signup(client, "ban-admin@example.test")
+    signup(client, "to-ban@example.test")
+    user_token = login(client, "to-ban@example.test")
+    with Session(engine) as db:
+        admin = db.get(User, admin_id)
+        admin.role = "admin"
+        db.add(admin)
+        db.commit()
+    admin_token = login(client, "ban-admin@example.test")
+    users = client.get("/api/v1/admin/users", headers=headers(admin_token)).json()
+    target = next(user for user in users if user["email"] == "to-ban@example.test")
+    banned = client.post(f"/api/v1/admin/users/{target['id']}/ban", headers=headers(admin_token),
+                         json={"reason": "Automated security test"})
+    assert banned.status_code == 200
+    assert client.get("/api/v1/users/me", headers=headers(user_token)).status_code == 401
