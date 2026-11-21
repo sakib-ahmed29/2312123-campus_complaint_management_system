@@ -285,15 +285,16 @@ function AdminDashboard() {
   async function load() {
     setBusy(true); setError("")
     try {
-      const [s, u, a, r, g, sec] = await Promise.all([
+      const [s, u, a, r, g, sec, me] = await Promise.all([
         api<Record<string,number>>("/api/v1/admin/stats"),
         api<typeof users>(`/api/v1/admin/users?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}&offset=${userOffset}&limit=50`),
         api<typeof activity>("/api/v1/admin/activity?limit=30"),
         api<typeof records>("/api/v1/admin/records?limit=100"),
         api<typeof groups>("/api/v1/admin/groups"),
         api<typeof security>("/api/v1/admin/security"),
+        api<{id:number}>("/api/v1/users/me"),
       ])
-      setStats(s); setUsers(u); setActivity(a); setRecords(r); setGroups(g); setSecurity(sec)
+      setStats(s); setUsers(u); setActivity(a); setRecords(r); setGroups(g); setSecurity(sec); setAdminId(me.id)
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load admin data") }
     finally { setBusy(false) }
   }
@@ -318,7 +319,7 @@ function AdminDashboard() {
     <label>Reason for ban / unban <input value={reason} onChange={e=>setReason(e.target.value)} /></label>
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Select</th><th>ID</th><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       {users.map(u=><tr key={u.id}><td><input type="checkbox" checked={selectedUserIds.includes(u.id)} onChange={e=>setSelectedUserIds(e.target.checked?[...selectedUserIds,u.id]:selectedUserIds.filter(id=>id!==u.id))}/></td><td>{u.id}</td><td>{u.full_name}<br/><small>{u.email}</small></td><td>{u.role}</td><td>{u.is_banned?"Banned":"Active"}</td><td style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="button secondary" onClick={async()=>{try{setUserDetail(await api(`/api/v1/admin/users/${u.id}`))}catch(e){setError(e instanceof Error?e.message:"Could not load user")}}}>Details</button><button className="button secondary" onClick={async()=>{try{await api(`/api/v1/admin/users/${u.id}/revoke-sessions`,{method:"POST"});await load()}catch(e){setError(e instanceof Error?e.message:"Could not revoke sessions")}}}>Revoke sessions</button>{u.role==="user" && <button className="button secondary" onClick={()=>void act(u.id,"promote")}>Make admin</button>}{u.role==="admin" && u.id!==adminId && <button className="button secondary" onClick={()=>void act(u.id,"demote")}>Make user</button>}{u.role==="user" && (u.is_banned?<button className="button secondary" onClick={()=>void act(u.id,"unban")}>Unban</button>:<button className="button danger-ghost" onClick={()=>void act(u.id,"ban")}>Ban</button>)}</td></tr>)}
-    </tbody></table></div>
+    </tbody></table></div><div style={{display:"flex",gap:8,marginTop:10}}><button className="button secondary" disabled={userOffset===0} onClick={()=>setUserOffset(Math.max(0,userOffset-50))}>Previous users</button><button className="button secondary" disabled={users.length<50} onClick={()=>setUserOffset(userOffset+50)}>Next users</button><span>Offset {userOffset}</span></div>
     {userDetail&&<div className="panel" style={{padding:16,marginTop:16}}><button className="button secondary" onClick={()=>setUserDetail(null)}>Close details</button><h3>{userDetail.user.full_name} · {userDetail.user.email}</h3><p>Complaints: {userDetail.complaints.length} · Groups: {userDetail.groups.length} · Sessions: {userDetail.sessions.length} · Recent events: {userDetail.activity.length}</p><h4>Recent complaints</h4><ul>{userDetail.complaints.slice(0,5).map((c:any)=><li key={c.id}>#{c.id} {c.title} — {c.status}</li>)}</ul><h4>Groups</h4><ul>{userDetail.groups.map((g:any)=><li key={g.id}>{g.name} (#{g.id})</li>)}</ul><h4>Recent activity</h4><ul>{userDetail.activity.slice(0,5).map((a:any)=><li key={a.id}>{a.event} · {new Date(a.created_at).toLocaleString()}</li>)}</ul></div>}
     <h3 style={{marginTop:28}}>Content moderation</h3>
     <h4>Complaints</h4>
