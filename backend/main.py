@@ -261,12 +261,15 @@ def verify_password(password: str, hashed: str) -> bool:
     return password_hasher.verify(password_input(password), hashed)
 
 
-def scopes_for(role: str) -> set[str]:
-    if role == "admin":
-        return {"profile:manage", "complaint:read:all", "complaint:delete:any", "complaint:status",
-                "user:read", "user:role", "user:ban", "stats:read", "audit:read", "content:moderate"}
-    return {"profile:manage", "complaint:create", "complaint:read:own", "complaint:update:own", "complaint:delete:own"}
-
+# Central role-to-permission policy used by every protected route.
+ROLE_PERMISSIONS = {
+    "user": frozenset({"profile:manage", "complaint:create", "complaint:read:own",
+                       "complaint:update:own", "complaint:delete:own", "group:collaborate"}),
+    "admin": frozenset({"profile:manage", "admin:access", "complaint:read:all",
+                        "complaint:delete:any", "complaint:status", "user:read", "user:manage",
+                        "user:role", "stats:read", "audit:read", "security:read",
+                        "content:moderate", "export:read"}),
+}
 
 def make_access(user: User) -> str:
     issued = now()
@@ -308,9 +311,9 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     return user
 
 
-def require_role(*roles: str):
+def require_permission(permission: str):
     def dependency(user: Annotated[User, Depends(current_user)]) -> User:
-        if user.role not in roles:
+        if permission not in ROLE_PERMISSIONS.get(user.role, frozenset()):
             raise HTTPException(403, "Insufficient permissions")
         return user
     return dependency
@@ -486,7 +489,7 @@ def change_password(payload: PasswordChange, request: Request, response: Respons
 
 
 @app.post("/api/v1/complaints", status_code=201)
-def create_complaint(payload: ComplaintCreate, request: Request, user: Annotated[User, Depends(require_role("user"))],
+def create_complaint(payload: ComplaintCreate, request: Request, user: Annotated[User, Depends(require_permission("complaint:create"))],
                      session: Annotated[Session, Depends(get_session)]):
     item = Complaint(owner_id=user.id, title=payload.title.strip(), description=payload.description.strip(),
                      category=payload.category)
@@ -557,7 +560,7 @@ ALLOWED_STATUS_CHANGES = {"pending": {"in_progress", "rejected"}, "in_progress":
 
 @app.patch("/api/v1/complaints/{complaint_id}/status")
 def update_complaint_status(complaint_id: int, payload: StatusUpdate, request: Request,
-                            user: Annotated[User, Depends(require_role("admin"))],
+                            user: Annotated[User, Depends(require_permission("complaint:status"))],
                             session: Annotated[Session, Depends(get_session)]):
     item = session.get(Complaint, complaint_id)
     if not item:
