@@ -337,7 +337,7 @@ function WorkspaceTools() {
   }
   useEffect(()=>{
     void loadGroups()
-    api<typeof profile>("/api/v1/users/me").then(p=>{setProfile(p);setNewEmail(p.email);setNewName(p.full_name)}).catch(()=>{})
+    api<{id:number;email:string;full_name:string}>("/api/v1/users/me").then(p=>{setProfile(p);setNewEmail(p.email);setNewName(p.full_name)}).catch(()=>{})
     api<typeof sessions>("/api/v1/auth/sessions").then(setSessions).catch(()=>{})
   },[])
   useEffect(()=>{if(selected!==null)void loadSelected(selected)},[selected])
