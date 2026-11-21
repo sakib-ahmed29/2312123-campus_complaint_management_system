@@ -581,8 +581,11 @@ def admin_stats(admin: Annotated[User, Depends(require_role("admin"))], session:
     count_records = session.exec(select(func.count()).select_from(Complaint)).one()
     count_groups = session.exec(select(func.count()).select_from(Group)).one()
     count_new = session.exec(select(func.count()).select_from(User).where(User.created_at >= week)).one()
+    new_records = session.exec(select(func.count()).select_from(Complaint).where(Complaint.created_at >= week)).one()
+    new_groups = session.exec(select(func.count()).select_from(Group).where(Group.created_at >= week)).one()
     return {"users": count_users, "banned_users": count_banned, "records": count_records,
-            "groups": count_groups, "new_users_last_7_days": count_new}
+            "groups": count_groups, "new_users_last_7_days": count_new,
+            "new_records_last_7_days": new_records, "new_groups_last_7_days": new_groups}
 
 
 @app.get("/api/v1/admin/users")
@@ -688,12 +691,14 @@ def bulk_ban(payload: list[int], request: Request, admin: Annotated[User, Depend
 @app.get("/api/v1/admin/activity")
 def admin_activity(admin: Annotated[User, Depends(require_role("admin"))],
                    session: Annotated[Session, Depends(get_session)], q: str = "", event: str | None = None,
-                   offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
+                   user_id: int | None = None, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
     statement = select(AuditEvent)
     if event:
         statement = statement.where(AuditEvent.event == event)
+    if user_id is not None:
+        statement = statement.where(AuditEvent.user_id == user_id)
     if q:
-        statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q))
+        statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q) | AuditEvent.user_agent.contains(q) | AuditEvent.event.contains(q))
     rows = session.exec(statement.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)).all()
     return [audit_out(row) for row in rows]
 
@@ -712,13 +717,19 @@ def admin_security(admin: Annotated[User, Depends(require_role("admin"))],
 
 
 @app.get("/api/v1/admin/export/{kind}")
-def admin_export(kind: str, admin: Annotated[User, Depends(require_role("admin"))],
-                 session: Annotated[Session, Depends(get_session)], status: str | None = None):
+def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(require_role("admin"))],
+                 session: Annotated[Session, Depends(get_session)], status: str | None = None,
+                 role: str | None = None, q: str = "", event: str | None = None):
     output = io.StringIO()
     writer = csv.writer(output)
     if kind == "users":
         writer.writerow(["id", "email", "full_name", "role", "is_banned", "created_at"])
-        for u in session.exec(select(User)).all():
+        statement = select(User)
+        if role in ("user", "admin"):
+            statement = statement.where(User.role == role)
+        if q:
+            statement = statement.where(User.email.contains(q) | User.full_name.contains(q))
+        for u in session.exec(statement).all():
             writer.writerow([u.id, u.email, u.full_name, u.role, u.is_banned, u.created_at.isoformat()])
     elif kind == "records":
         writer.writerow(["id", "owner_id", "title", "category", "status", "created_at"])
@@ -729,10 +740,17 @@ def admin_export(kind: str, admin: Annotated[User, Depends(require_role("admin")
             writer.writerow([c.id, c.owner_id, c.title, c.category, c.status, c.created_at.isoformat()])
     elif kind == "activity":
         writer.writerow(["id", "user_id", "event", "ip_address", "user_agent", "created_at"])
-        for a in session.exec(select(AuditEvent)).all():
+        statement = select(AuditEvent)
+        if event:
+            statement = statement.where(AuditEvent.event == event)
+        if q:
+            statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q) | AuditEvent.event.contains(q))
+        for a in session.exec(statement).all():
             writer.writerow([a.id, a.user_id, a.event, a.ip_address, a.user_agent, a.created_at.isoformat()])
     else:
         raise HTTPException(404, "Unknown export type")
+    log_event(session, request, "data_export", admin.id, kind, detail=f"status={status}; role={role}; event={event}; q={q}")
+    session.commit()
     return Response(content=output.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="campuscare-{kind}.csv"'})
 
@@ -853,6 +871,10 @@ def update_group_record(group_id: int, record_id: int, payload: GroupRecordUpdat
     changes = payload.model_dump(exclude_unset=True)
     if "assignee_id" in changes and group.owner_id != user.id and not member.can_assign:
         raise HTTPException(403, "Group assign permission required")
+    if "assignee_id" in changes and changes["assignee_id"] is not None:
+        assigned_member = session.exec(select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.user_id == changes["assignee_id"])).first()
+        if not assigned_member:
+            raise HTTPException(422, "Assignee must be a member of this group")
     for key, value in changes.items():
         setattr(record, key, value)
     record.updated_at = now()
