@@ -48,10 +48,10 @@ def main() -> None:
             if not user:
                 user = User(email=email, full_name=name, password_hash=hash_password(password), role=role)
             else:
+                # Keep an existing demo user's password and account status.
+                # Re-running the seed must not silently reset credentials or unban accounts.
+                user.full_name = name
                 user.role = role
-                user.password_hash = hash_password(password)
-                user.is_banned = False
-                user.suspended_until = None
             db.add(user)
             db.commit()
             db.refresh(user)
