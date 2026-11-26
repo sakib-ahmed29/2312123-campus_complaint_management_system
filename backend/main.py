@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import io
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,9 @@ from typing import Annotated, Literal
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
 from sqlalchemy import func
@@ -299,7 +303,7 @@ def issue_refresh(session: Session, user: User, request: Request, response: Resp
 def log_event(session: Session, request: Request, event: str, user_id: int | None = None,
               target_type: str | None = None, target_id: str | None = None, detail: str | None = None):
     session.add(AuditEvent(user_id=user_id, event=event, target_type=target_type, target_id=target_id,
-                           detail=detail, ip_address=request.client.host if request.client else None,
+                           detail=detail, ip_address=client_ip(request),
                            user_agent=request.headers.get("user-agent")))
 
 
@@ -361,6 +365,39 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="CampusCare API", version="1.0.0", docs_url="/api/docs",
                openapi_url="/api/openapi.json", redoc_url=None, lifespan=lifespan)
 
+# CORS is limited to the deployed frontend origin(s). The frontend normally calls the API
+# through the same origin (Vercel rewrites), so this only matters for cross-origin clients.
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv(
+    "ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=True,
+                   allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+                   allow_headers=["Authorization", "Content-Type"])
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def valid_email(value: str) -> str:
+    email = value.strip().lower()
+    if len(email) > 254 or not EMAIL_PATTERN.match(email):
+        raise HTTPException(422, "Enter a valid email address")
+    return email
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_: Request, exc: RequestValidationError):
+    # One consistent error shape: {"detail": "<message>"}; never echo internals.
+    parts = []
+    for error in exc.errors()[:5]:
+        field = ".".join(str(p) for p in error.get("loc", ()) if p not in ("body", "query", "path"))
+        parts.append(f"{field}: {error.get('msg')}" if field else str(error.get("msg")))
+    return JSONResponse(status_code=422, content={"detail": "; ".join(parts) or "Invalid request"})
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(_: Request, __: Exception):
+    # No stack traces or internal messages are ever sent to the client.
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 @app.get("/api/health")
 def health():
@@ -369,7 +406,7 @@ def health():
 
 @app.post("/api/v1/auth/signup", status_code=201)
 def signup(payload: Signup, request: Request, session: Annotated[Session, Depends(get_session)]):
-    email = payload.email.strip().lower()
+    email = valid_email(payload.email)
     if len(payload.password) < 8 or not any(c.isalpha() for c in payload.password) or not any(c.isdigit() for c in payload.password):
         raise HTTPException(422, "Password must contain at least 8 characters, one letter and one number")
     if session.exec(select(User).where(User.email == email)).first():
@@ -498,7 +535,7 @@ def get_profile(user: Annotated[User, Depends(current_user)]):
 @app.patch("/api/v1/users/me")
 def update_profile(payload: ProfileUpdate, request: Request, user: Annotated[User, Depends(current_user)],
                    session: Annotated[Session, Depends(get_session)]):
-    email = payload.email.strip().lower()
+    email = valid_email(payload.email)
     existing = session.exec(select(User).where(User.email == email, User.id != user.id)).first()
     if existing:
         raise HTTPException(409, "Email already in use")
@@ -815,7 +852,8 @@ def admin_security(admin: Annotated[User, Depends(require_permission("admin:acce
 @app.get("/api/v1/admin/export/{kind}")
 def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
                  session: Annotated[Session, Depends(get_session)], status: str | None = None,
-                 role: str | None = None, q: str = "", event: str | None = None):
+                 role: str | None = None, q: str = "", event: str | None = None,
+                 category: str | None = None):
     output = io.StringIO()
     writer = csv.writer(output)
     if kind == "users":
@@ -823,16 +861,24 @@ def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(req
         statement = select(User)
         if role in ("user", "admin"):
             statement = statement.where(User.role == role)
+        if status == "banned":
+            statement = statement.where(User.is_banned == True)
+        elif status == "suspended":
+            statement = statement.where(User.is_banned == False, User.suspended_until > now())
+        elif status == "active":
+            statement = statement.where(User.is_banned == False).where((User.suspended_until == None) | (User.suspended_until <= now()))
         if q:
-            statement = statement.where(User.email.contains(q) | User.full_name.contains(q))
-        for u in session.exec(statement).all():
+            statement = statement.where(User.email.contains(q.lower()) | User.full_name.contains(q))
+        for u in session.exec(statement.order_by(User.id)).all():
             writer.writerow([u.id, u.email, u.full_name, u.role, u.is_banned, u.created_at.isoformat()])
     elif kind == "records":
         writer.writerow(["id", "owner_id", "title", "category", "status", "created_at"])
         statement = select(Complaint)
         if status:
             statement = statement.where(Complaint.status == status)
-        for c in session.exec(statement).all():
+        if category:
+            statement = statement.where(Complaint.category == category)
+        for c in session.exec(statement.order_by(Complaint.id)).all():
             writer.writerow([c.id, c.owner_id, c.title, c.category, c.status, c.created_at.isoformat()])
     elif kind == "activity":
         writer.writerow(["id", "user_id", "event", "ip_address", "user_agent", "created_at"])
@@ -840,8 +886,8 @@ def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(req
         if event:
             statement = statement.where(AuditEvent.event == event)
         if q:
-            statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q) | AuditEvent.event.contains(q))
-        for a in session.exec(statement).all():
+            statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q) | AuditEvent.user_agent.contains(q) | AuditEvent.event.contains(q))
+        for a in session.exec(statement.order_by(AuditEvent.id.desc())).all():
             writer.writerow([a.id, a.user_id, a.event, a.ip_address, a.user_agent, a.created_at.isoformat()])
     else:
         raise HTTPException(404, "Unknown export type")
@@ -1007,7 +1053,7 @@ def bulk_unban(payload: list[int], request: Request, admin: Annotated[User, Depe
         target = session.get(User, user_id)
         if target and target.role == "user" and target.is_banned:
             target.is_banned, target.ban_reason = False, None
-            log_event(session, request, "user_unbanned", admin.id, "user", str(user_id))
+            log_event(session, request, "user_unbanned", admin.id, "user", str(user_id), reason)
             updated.append(user_id)
     session.commit()
     return {"updated_user_ids": updated}
