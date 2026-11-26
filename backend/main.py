@@ -713,10 +713,12 @@ def admin_user_detail(user_id: int, admin: Annotated[User, Depends(require_permi
     sessions = session.exec(select(RefreshSession).where(RefreshSession.user_id == user_id)).all()
     activity = session.exec(select(AuditEvent).where(AuditEvent.user_id == user_id).order_by(AuditEvent.created_at.desc()).limit(30)).all()
     return {"user": {"id": target.id, "email": target.email, "full_name": target.full_name, "role": target.role,
-                     "is_banned": target.is_banned, "created_at": target.created_at},
+                     "is_banned": target.is_banned, "ban_reason": target.ban_reason,
+                     "created_at": target.created_at},
             "complaints": [complaint_out(x) for x in complaints],
             "groups": [group_out(x) for x in groups],
-            "sessions": [{"id": x.id, "created_at": x.created_at, "revoked_at": x.revoked_at} for x in sessions],
+            "sessions": [{"id": x.id, "created_at": x.created_at, "expires_at": x.expires_at, "revoked_at": x.revoked_at,
+                          "ip_address": x.ip_address, "user_agent": x.user_agent} for x in sessions],
             "activity": [audit_out(x) for x in activity]}
 
 
@@ -976,7 +978,10 @@ def group_members(group_id: int, user: Annotated[User, Depends(current_user)],
                   session: Annotated[Session, Depends(get_session)]):
     group, _ = group_access(group_id, user, session)
     members = session.exec(select(GroupMember).where(GroupMember.group_id == group_id)).all()
-    return [{"user_id": m.user_id, "can_create": m.can_create, "can_edit": m.can_edit,
+    people = {u.id: u for u in session.exec(select(User).where(User.id.in_([m.user_id for m in members]))).all()}
+    return [{"user_id": m.user_id, "full_name": people[m.user_id].full_name if m.user_id in people else None,
+             "email": people[m.user_id].email if m.user_id in people else None,
+             "can_create": m.can_create, "can_edit": m.can_edit,
              "can_assign": m.can_assign, "is_owner": m.user_id == group.owner_id} for m in members]
 
 
