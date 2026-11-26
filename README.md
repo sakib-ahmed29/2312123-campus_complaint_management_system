@@ -37,7 +37,7 @@ A secure multi-user campus complaint platform built with React + TypeScript, Fas
 
 ### Admin workspace
 - Overview statistics and searchable user list.
-- Role changes, ban/unban and session revocation.
+- Role changes, ban/unban and session revocation. Administrators cannot change their own role or ban another administrator.
 - Complaint and group moderation.
 - Activity/audit history and security summary.
 - CSV exports for users, records and activity.
