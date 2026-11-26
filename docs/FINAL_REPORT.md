@@ -5,62 +5,83 @@
 **Student:** Sakib Ahmed Faisal  
 **Student ID:** 2312123  
 **Repository:** https://github.com/sakib-ahmed29/2312123-campus_complaint_management_system  
-**Development branch:** `feature/final-auth-rbac-admin`
+**Production application:** https://2312123-campuscomplaintmanagementsystem-sakib-ahmed-iub.vercel.app  
+**Production deployment:** https://2312123-campuscomplaintmanagementsystem-1mmqheb1v.vercel.app  
+**Release branch:** `main`  
+**Verified main commit:** `0d0798e88345c0aee3d623805a872774ed92d550`  
+**Report verification date:** 26 November 2026
 
-## Final implementation addendum
+## 1. Project status
 
-This report combines the project PRD, SRS and TDD with the final multi-user implementation plan. The working branch introduces the following implementation:
+CampusCare is implemented, merged into the repository's `main` branch and deployed to Vercel production. The production deployment is marked READY. The React frontend and FastAPI service are hosted under the same origin, with Supabase PostgreSQL providing persistent storage.
 
-- User registration and login with Argon2 password hashing and a server-side password pepper.
-- Short-lived signed JWT access tokens, httpOnly refresh cookies, refresh rotation and session revocation.
-- User/admin roles and server-enforced authorization.
-- Complaint ownership isolation; users can only access their own complaints while admins can moderate all complaints.
-- Shared groups with owner-controlled membership and create/edit/assign permission flags.
-- Admin overview, user search, role changes, ban/unban, session revocation, complaint/group moderation, activity history, security summary and CSV export API.
-- A React login/signup experience, token refresh handling, profile/password/session controls, group workspace and admin dashboard.
-- Pytest regression tests and GitHub Actions checks for backend and frontend.
+The implementation provides:
+- React 19, TypeScript and Vite frontend.
+- FastAPI, SQLModel and PostgreSQL backend.
+- Signup, login, short-lived JWT access tokens, rotating httpOnly refresh cookies, logout and session revocation.
+- Argon2 password hashing with a server-side pepper.
+- Server-enforced user/admin authorization and complaint ownership checks.
+- Complaint CRUD and admin moderation.
+- Shared groups with owner-managed membership and create/edit/assign permissions.
+- Admin dashboard, user management, suspension/ban controls, audit history, security summary and CSV exports.
+- Feature-based frontend organization, modular backend routers and regression tests.
 
-## Deployment and configuration requirements
+## 2. Deployment and automated verification
 
-The branch is not production-ready until the GitHub Actions checks pass and the changes are reviewed and merged. Before production deployment, configure these Vercel environment variables:
+The production deployment for the verified `main` commit is READY.
 
-| Variable | Purpose |
+| Check | Result |
 |---|---|
-| `DATABASE_URL` | Supabase PostgreSQL transaction-pooler connection string using `postgresql+psycopg://` |
-| `JWT_SECRET` | Long, randomly generated signing secret |
-| `PASSWORD_PEPPER` | Separate long random secret used in password hashing |
-| `ACCESS_TOKEN_MINUTES` | Set to 15 or less |
-| `REFRESH_TOKEN_DAYS` | Refresh-session lifetime; default 7 |
-| `COOKIE_SECURE` | `true` in production; `false` only for local HTTP development |
+| Production homepage | HTTP 200 |
+| `/api/health` | HTTP 200; reports `{"status":"ok"}` |
+| `/api/docs` | HTTP 200; Swagger UI is served |
+| `/api/openapi.json` | HTTP 200 |
+| GitHub Actions frontend job | Passed; `npm ci` and `npm run build` |
+| GitHub Actions backend job | Passed; dependencies installed and `pytest -q` |
+| Vercel runtime errors | No errors reported in the checked 24-hour window |
 
-Never put real secrets, passwords or Supabase credentials in GitHub. Use `.env.example` as a variable-name template only.
+CI run: https://github.com/sakib-ahmed29/2312123-campus_complaint_management_system/actions/runs/45864443699
 
-The original MVP complaint table is upgraded additively with an `owner_id` field during application startup. Existing complaints with no owner remain visible to admins but are not exposed to normal users.
+These checks establish that the production frontend and API endpoints are reachable and that the repository's automated build and test jobs pass. They do not replace manual browser testing of every account role and workflow.
 
-## Instructor demo-account preparation
+## 3. Database and access security
 
-Create at least five demo accounts through the signup page using unique email addresses and demo-only passwords. Promote two of those accounts to administrators from the Supabase SQL editor after signup:
+The production Supabase project is active and healthy. Existing user and complaint records were preserved. The eight application tables have row-level security enabled.
 
-```sql
-UPDATE "user" SET role = 'admin' WHERE email IN ('admin1@example.test', 'admin2@example.test');
-```
+The application uses a server-side FastAPI database connection; the browser does not query the Supabase Data API directly. A database migration (`20261126172627_campuscare_server_only_data_api_access`) revokes table and sequence privileges from `anon`, `authenticated` and `PUBLIC`, and removes default table/sequence grants for objects created by the current database role. Verification confirmed that these API roles cannot select from the application tables while the `postgres` backend role retains access.
 
-Keep the actual demo passwords in the submission form and PDF report only, never in this repository. Use the remaining three accounts as normal users. Create one shared group owned by a normal user, add at least two members, and assign mixed permissions (for example, one member can create only and another can create and edit).
+No per-user RLS policies are defined because the application authorization boundary is the FastAPI API, and direct Data API table access is intentionally disabled. Do not add direct browser-to-database queries without first designing and testing matching RLS policies.
 
-## Verification checklist
+## 4. Instructor demo data
 
-- [ ] GitHub Actions backend pytest job passes.
-- [ ] GitHub Actions frontend TypeScript/Vite build passes.
-- [ ] Supabase environment variables are configured in Vercel.
-- [ ] A first admin is promoted using the SQL above.
-- [ ] Two admin and three user demo accounts are prepared.
-- [ ] Signup, login, refresh, logout and session revocation work on the deployed origin.
-- [ ] A normal user cannot read or change another user's complaint.
-- [ ] A normal user receives 403 when attempting an admin-only action.
-- [ ] Group owner and member permissions are demonstrated.
-- [ ] Admin ban, unban, role change, moderation, audit log and CSV export are demonstrated.
-- [ ] Expired access token rejection and refresh are recorded in browser developer tools.
-- [ ] PDF report screenshots and 5–8 minute narrated video are prepared.
+The repository includes `backend/seed_demo.py`, which prepares:
+- Two administrator accounts.
+- Three normal student accounts.
+- Four sample complaints.
+- A shared `Hostel Maintenance Team` group.
+- Owner, create/edit and assign-only permissions.
+
+The production database was checked before demo seeding: it contained three existing accounts and four legacy complaints, but no `@campuscare.test` demo accounts and no groups. **The instructor demo seed has not yet been run.** The seeding script needs the production `DATABASE_URL` and `PASSWORD_PEPPER`; the connected deployment tools did not grant permission to decrypt the password-pepper secret, so it was not possible to seed credentials safely from this session. Follow the Windows PowerShell procedure in the repository README. The script does not print passwords, and the updated version preserves credentials of demo accounts that already exist.
+
+After seeding, record the printed account IDs and test each role before sharing the demo credentials with the instructor. Never commit demo passwords or production secrets.
+
+## 5. Final manual verification still required
+
+- [ ] Run the demo seeding script and record the five account IDs.
+- [ ] Sign in as an administrator and verify dashboard, moderation, user management, audit history and CSV export.
+- [ ] Sign in as a student and verify complaint create/read/edit/delete ownership restrictions.
+- [ ] Verify the group owner can manage the group and members.
+- [ ] Verify the create/edit member can create and edit but cannot manage membership.
+- [ ] Verify the assign-only member can assign but cannot create or edit records.
+- [ ] Verify refresh, logout and session revocation in a real browser.
+- [ ] Capture final screenshots and prepare the instructor submission materials.
+
+The production deployment, code structure, database schema and automated CI are in place. The remaining release gate is the populated demo environment and live, role-by-role browser walkthrough.
+
+## 6. Supporting planning documents
+
+The sections that follow retain the original PRD, SRS and TDD material as planning appendices. Where an early planning assumption differs from the current implementation, this status report, the current README and the live API contract describe the delivered system.
+
 
 ---
 
