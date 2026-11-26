@@ -136,28 +136,59 @@ The backend creates missing tables and adds the complaint ownership column to an
 
 ## Initial admin setup and instructor accounts
 
-Public signup always creates a normal `user`. Demo data is created with the idempotent seed script, which reads the demo password from the environment (never stored in the repo). Use the same `DATABASE_URL`, `JWT_SECRET` and `PASSWORD_PEPPER` as production:
+The production database is preconfigured for the FastAPI backend. Public signup always creates a normal `user`; do not promote accounts manually unless you are following the recovery procedure.
+
+For the instructor demonstration, the idempotent `backend/seed_demo.py` script creates two administrators, three students, sample complaints and the shared group `Hostel Maintenance Team`. It uses the same production database URL and password pepper as the deployed API. It does not store or print the demo password. Existing demo account passwords are preserved when the script is re-run.
+
+### Windows PowerShell seeding steps
+
+Run these commands from the repository root. Vercel CLI must be logged in and this repository must be linked to the CampusCare Vercel project:
 
 ```powershell
-cd backend
-$env:DATABASE_URL="<supabase pooler url>"
-$env:JWT_SECRET="<same as Vercel>"
-$env:PASSWORD_PEPPER="<same as Vercel>"
-$env:DEMO_PASSWORD="<demo-only password with a letter and a number>"
-python seed_demo.py
+npx vercel login
+npx vercel link --project 2312123-campus_complaint_management_system --scope sakib-ahmed-iub
+npx vercel env pull .env.production.local --environment production
+
+# Load only the production variables needed by the seed into this terminal process.
+Get-Content .env.production.local | ForEach-Object {
+    if ($_ -match '^(DATABASE_URL|JWT_SECRET|PASSWORD_PEPPER)=(.*)$') {
+        $key = $Matches[1]
+        $value = $Matches[2].Trim()
+        if ($value.StartsWith('"') -and $value.EndsWith('"')) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+    }
+}
+
+# Enter a demo-only password without putting it in shell history.
+$secureDemoPassword = Read-Host "Enter a demo-only password (8+ characters, letters and numbers)" -AsSecureString
+$env:DEMO_PASSWORD = [System.Net.NetworkCredential]::new("", $secureDemoPassword).Password
+
+python backend/seed_demo.py
+
+# Remove the local production env file and password from this terminal.
+Remove-Item .env.production.local
+Remove-Item Env:DEMO_PASSWORD
+Remove-Item Env:DATABASE_URL
+Remove-Item Env:JWT_SECRET
+Remove-Item Env:PASSWORD_PEPPER
 ```
 
-It creates 2 admins, 3 normal users, sample complaints, and one shared group, then prints the user IDs. Copy them into the table below (replace the `?` after running the script). Passwords go only in the submission form and the PDF report.
+If Vercel CLI asks to link the project, select the existing project. Do not paste the env file or its values into chat, GitHub, screenshots or the final report.
 
-| User ID | Role | Email |
-|---|---|---|
-| ? | admin | admin1@campuscare.test |
-| ? | admin | admin2@campuscare.test |
-| ? | user | student1@campuscare.test (owner of the shared group) |
-| ? | user | student2@campuscare.test (group member: create + edit) |
-| ? | user | student3@campuscare.test (group member: assign only) |
+After the script completes, it prints the account IDs and group ID. Use this table to record the IDs locally for your viva/demo:
 
-Shared group: **Hostel Maintenance Team**, owned by student1. Only the owner can rename, delete or manage members; student2 can create and edit records; student3 can assign records only.
+| User ID | Role | Email | Group permission |
+|---|---|---|---|
+| Printed by script | admin | admin1@campuscare.test | Administrator |
+| Printed by script | admin | admin2@campuscare.test | Administrator |
+| Printed by script | user | student1@campuscare.test | Group owner |
+| Printed by script | user | student2@campuscare.test | Create + edit |
+| Printed by script | user | student3@campuscare.test | Assign only |
+
+The script is safe to re-run for missing demo data. It does not reset passwords for existing demo users; keep the original demo password in a secure place for the instructor walkthrough.
+
 
 ## Tests
 
