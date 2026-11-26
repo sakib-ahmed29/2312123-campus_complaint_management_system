@@ -17,7 +17,10 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from main import app, engine, User, now
+from campuscare.database import engine
+from campuscare.models import User
+from campuscare.utils import now
+from main import app
 
 
 @pytest.fixture()

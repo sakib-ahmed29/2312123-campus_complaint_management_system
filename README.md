@@ -56,6 +56,25 @@ Swagger documentation: `/api/docs`
 | Groups | `/api/v1/groups` (groups, members, shared records) |
 | Admin | `/api/v1/admin/stats`, `/users`, `/activity`, `/security`, `/records`, `/groups`, `/export/{kind}` |
 
+## Project structure
+
+```
+backend/
+  main.py                 entrypoint (main:app)
+  seed_demo.py            demo accounts and sample data
+  campuscare/
+    app.py                application factory, CORS, lifespan
+    config.py database.py environment settings, engine and session
+    models.py schemas.py  database tables, request payloads
+    security.py           password hashing, JWT, RBAC permission map and dependencies
+    audit.py validation.py errors.py   audit log, input checks, consistent errors
+    routers/              auth, users, complaints, groups, admin_users, admin_content, admin_reports
+  tests/                  pytest suite
+  migrations/             SQL for Supabase
+frontend/src/             React + TypeScript app
+docs/                     PRD, SRS, TDD and FINAL_REPORT.md
+```
+
 ## Local setup (Windows PowerShell)
 
 ### 1. Backend
