@@ -17,7 +17,10 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from main import app, engine, User, now
+from campuscare.database import engine
+from campuscare.models import User
+from campuscare.utils import now
+from main import app
 
 
 @pytest.fixture()
@@ -250,3 +253,54 @@ def test_admin_can_demote_self_when_another_admin_remains(client):
     with Session(engine) as db:
         assert db.get(User, first_admin_id).role == "user"
         assert db.get(User, second_admin_id).role == "admin"
+
+
+def test_invalid_email_and_validation_errors_use_one_error_shape(client):
+    bad_email = client.post("/api/v1/auth/signup", json={
+        "email": "not-an-email", "full_name": "Campus User", "password": "campus1234"})
+    assert bad_email.status_code == 422
+    assert isinstance(bad_email.json()["detail"], str)
+    short_name = client.post("/api/v1/auth/signup", json={
+        "email": "shortname@example.test", "full_name": "A", "password": "campus1234"})
+    assert short_name.status_code == 422
+    assert isinstance(short_name.json()["detail"], str)
+
+
+def test_admin_endpoints_reject_normal_users_and_activity_stores_forwarded_ip(client):
+    admin_id = signup(client, "audit-admin@example.test")
+    signup(client, "audit-user@example.test")
+    user_token = login(client, "audit-user@example.test")
+    with Session(engine) as db:
+        admin = db.get(User, admin_id)
+        admin.role = "admin"
+        db.add(admin)
+        db.commit()
+    assert client.get("/api/v1/admin/stats", headers=headers(user_token)).status_code == 403
+    assert client.get("/api/v1/admin/export/users", headers=headers(user_token)).status_code == 403
+
+    response = client.post("/api/v1/auth/login", json={"email": "audit-admin@example.test", "password": "campus1234"},
+                           headers={"X-Forwarded-For": "203.0.113.9", "User-Agent": "pytest-browser"})
+    assert response.status_code == 200
+    admin_token = response.json()["access_token"]
+    events = client.get("/api/v1/admin/activity?event=login", headers=headers(admin_token)).json()
+    assert any(e["ip_address"] == "203.0.113.9" and e["user_agent"] == "pytest-browser" for e in events)
+
+
+def test_user_export_respects_status_and_role_filters(client):
+    admin_id = signup(client, "export-admin@example.test")
+    target_id = signup(client, "export-target@example.test")
+    with Session(engine) as db:
+        admin = db.get(User, admin_id)
+        admin.role = "admin"
+        db.add(admin)
+        db.commit()
+    admin_token = login(client, "export-admin@example.test")
+    assert client.post(f"/api/v1/admin/users/{target_id}/ban", headers=headers(admin_token),
+                       json={"reason": "Export test"}).status_code == 200
+    banned = client.get("/api/v1/admin/export/users?status=banned", headers=headers(admin_token))
+    assert banned.status_code == 200
+    assert "export-target@example.test" in banned.text
+    assert "export-admin@example.test" not in banned.text
+    admins = client.get("/api/v1/admin/export/users?role=admin", headers=headers(admin_token))
+    assert "export-admin@example.test" in admins.text
+    assert "export-target@example.test" not in admins.text

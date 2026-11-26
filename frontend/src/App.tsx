@@ -25,6 +25,12 @@ const statuses: { value: Status; label: string }[] = [
   { value: "pending", label: "Pending" }, { value: "in_progress", label: "In progress" },
   { value: "resolved", label: "Resolved" }, { value: "rejected", label: "Rejected" },
 ]
+type Page = "home" | "about" | "complaints" | "profile" | "contact" | "admin" | "users"
+const PAGES: Page[] = ["home", "about", "complaints", "profile", "contact", "admin", "users"]
+function pageFromHash(): Page {
+  const value = window.location.hash.replace(/^#\/?/, "")
+  return (PAGES as string[]).includes(value) ? (value as Page) : "home"
+}
 const emptyForm: ComplaintForm = { title: "", description: "", category: "academic" }
 
 let accessToken = ""
@@ -262,7 +268,7 @@ function ComplaintWorkspace() {
 function AdminDashboard() {
   const [stats, setStats] = useState<Record<string, number> | null>(null)
   const [users, setUsers] = useState<Array<{id:number;email:string;full_name:string;role:string;is_banned:boolean;status:"active"|"suspended"|"banned";suspended_until:string|null}>>([])
-  const [activity, setActivity] = useState<Array<{id:number;event:string;user_id:number|null;created_at:string;detail:string|null}>>([])
+  const [activity, setActivity] = useState<Array<{id:number;event:string;user_id:number|null;created_at:string;detail:string|null;ip_address:string|null;user_agent:string|null}>>([])
   const [records,setRecords]=useState<Array<{id:number;title:string;category:string;status:string;owner_id:number|null}>>([])
   const [groups,setGroups]=useState<Array<{id:number;name:string;owner_id:number}>>([])
   const [security,setSecurity]=useState<{failed_logins_last_7_days:number;by_ip:Record<string,number>;by_account:Record<string,number>}|null>(null)
@@ -279,6 +285,8 @@ function AdminDashboard() {
   const [selectedRecordIds,setSelectedRecordIds]=useState<number[]>([])
   const [selectedGroupIds,setSelectedGroupIds]=useState<number[]>([])
   const [recordStatusFilter,setRecordStatusFilter]=useState("")
+  const [recordCategoryFilter,setRecordCategoryFilter]=useState("")
+  const [activityUser,setActivityUser]=useState("")
   const [groupQuery,setGroupQuery]=useState("")
   const [activityQuery,setActivityQuery]=useState("")
   const [activityEvent,setActivityEvent]=useState("")
@@ -288,8 +296,8 @@ function AdminDashboard() {
       const [s, u, a, r, g, sec, me] = await Promise.all([
         api<Record<string,number>>("/api/v1/admin/stats"),
         api<typeof users>(`/api/v1/admin/users?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}&offset=${userOffset}&limit=50`),
-        api<typeof activity>(`/api/v1/admin/activity?limit=30&q=${encodeURIComponent(activityQuery)}&event=${activityEvent}`),
-        api<typeof records>(`/api/v1/admin/records?limit=100&status=${recordStatusFilter}`),
+        api<typeof activity>(`/api/v1/admin/activity?limit=30&q=${encodeURIComponent(activityQuery)}&event=${activityEvent}${/^\d+$/.test(activityUser)?`&user_id=${activityUser}`:""}`),
+        api<typeof records>(`/api/v1/admin/records?limit=100&status=${recordStatusFilter}&category=${recordCategoryFilter}`),
         api<typeof groups>(`/api/v1/admin/groups?q=${encodeURIComponent(groupQuery)}`),
         api<typeof security>("/api/v1/admin/security"),
         api<{id:number}>("/api/v1/users/me"),
@@ -321,19 +329,19 @@ function AdminDashboard() {
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Select</th><th>ID</th><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       {users.map(u=><tr key={u.id}><td><input type="checkbox" checked={selectedUserIds.includes(u.id)} onChange={e=>setSelectedUserIds(e.target.checked?[...selectedUserIds,u.id]:selectedUserIds.filter(id=>id!==u.id))}/></td><td>{u.id}</td><td>{u.full_name}<br/><small>{u.email}</small></td><td>{u.role}</td><td><span className={`account-status ${u.status}`}>{u.status}</span></td><td style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="button secondary" onClick={async()=>{try{setUserDetail(await api(`/api/v1/admin/users/${u.id}`))}catch(e){setError(e instanceof Error?e.message:"Could not load user")}}}>Details</button><button className="button secondary" onClick={async()=>{try{await api(`/api/v1/admin/users/${u.id}/revoke-sessions`,{method:"POST"});await load()}catch(e){setError(e instanceof Error?e.message:"Could not revoke sessions")}}}>Revoke sessions</button>{u.role==="user" && <button className="button secondary" onClick={()=>void act(u.id,"promote")}>Make admin</button>}{u.role==="admin" && u.id!==adminId && <button className="button secondary" onClick={()=>void act(u.id,"demote")}>Make user</button>}{u.role==="user" && (u.is_banned?<button className="button secondary" onClick={()=>void act(u.id,"unban")}>Unban</button>:<button className="button danger-ghost" onClick={()=>void act(u.id,"ban")}>Ban</button>)}</td></tr>)}
     </tbody></table></div><div style={{display:"flex",gap:8,marginTop:10}}><button className="button secondary" disabled={userOffset===0} onClick={()=>setUserOffset(Math.max(0,userOffset-50))}>Previous users</button><button className="button secondary" disabled={users.length<50} onClick={()=>setUserOffset(userOffset+50)}>Next users</button><span>Offset {userOffset}</span></div>
-    {userDetail&&<div className="panel" style={{padding:16,marginTop:16}}><button className="button secondary" onClick={()=>setUserDetail(null)}>Close details</button><h3>{userDetail.user.full_name} · {userDetail.user.email}</h3><p>Complaints: {userDetail.complaints.length} · Groups: {userDetail.groups.length} · Sessions: {userDetail.sessions.length} · Recent events: {userDetail.activity.length}</p><h4>Recent complaints</h4><ul>{userDetail.complaints.slice(0,5).map((c:any)=><li key={c.id}>#{c.id} {c.title} — {c.status}</li>)}</ul><h4>Groups</h4><ul>{userDetail.groups.map((g:any)=><li key={g.id}>{g.name} (#{g.id})</li>)}</ul><h4>Recent activity</h4><ul>{userDetail.activity.slice(0,5).map((a:any)=><li key={a.id}>{a.event} · {new Date(a.created_at).toLocaleString()}</li>)}</ul></div>}
+    {userDetail&&<div className="panel" style={{padding:16,marginTop:16}}><button className="button secondary" onClick={()=>setUserDetail(null)}>Close details</button><h3>{userDetail.user.full_name} · {userDetail.user.email}</h3><p>Role: {userDetail.user.role} · Status: {userDetail.user.is_banned?`banned (${userDetail.user.ban_reason??"no reason"})`:"active"} · Joined {new Date(userDetail.user.created_at).toLocaleDateString()}</p><p>Complaints: {userDetail.complaints.length} · Groups: {userDetail.groups.length} · Sessions: {userDetail.sessions.length} · Recent events: {userDetail.activity.length}</p><h4>Sessions</h4><ul>{userDetail.sessions.length===0?<li>No sessions.</li>:userDetail.sessions.slice(0,8).map((x:any)=><li key={x.id}>#{x.id} · {x.ip_address??"IP unknown"} · {x.revoked_at?"revoked":"active"} · {new Date(x.created_at).toLocaleString()}</li>)}</ul><h4>Recent complaints</h4><ul>{userDetail.complaints.slice(0,5).map((c:any)=><li key={c.id}>#{c.id} {c.title} — {c.status}</li>)}</ul><h4>Groups</h4><ul>{userDetail.groups.map((g:any)=><li key={g.id}>{g.name} (#{g.id})</li>)}</ul><h4>Recent activity</h4><ul>{userDetail.activity.slice(0,5).map((a:any)=><li key={a.id}>{a.event} · {new Date(a.created_at).toLocaleString()}</li>)}</ul></div>}
     <h3 style={{marginTop:28}}>Content moderation</h3>
     <h4>Complaints</h4>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}><select value={recordStatusFilter} onChange={e=>setRecordStatusFilter(e.target.value)}><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select><button className="button secondary" onClick={()=>void load()}>Filter records</button><button className="button danger-ghost" disabled={!selectedRecordIds.length} onClick={async()=>{if(confirm("Delete selected complaints?")){await api("/api/v1/admin/records/bulk-delete",{method:"POST",body:JSON.stringify(selectedRecordIds)});setSelectedRecordIds([]);await load()}}}>Delete selected ({selectedRecordIds.length})</button></div>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}><select value={recordStatusFilter} onChange={e=>setRecordStatusFilter(e.target.value)}><option value="">All statuses</option><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select><select value={recordCategoryFilter} onChange={e=>setRecordCategoryFilter(e.target.value)}><option value="">All categories</option>{categories.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}</select><button className="button secondary" onClick={()=>void load()}>Filter records</button><button className="button danger-ghost" disabled={!selectedRecordIds.length} onClick={async()=>{if(confirm("Delete selected complaints?")){await api("/api/v1/admin/records/bulk-delete",{method:"POST",body:JSON.stringify(selectedRecordIds)});setSelectedRecordIds([]);await load()}}}>Delete selected ({selectedRecordIds.length})</button></div>
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Select</th><th>ID</th><th>Title</th><th>Category</th><th>Status</th><th>Action</th></tr></thead><tbody>{records.map(r=><tr key={r.id}><td><input type="checkbox" checked={selectedRecordIds.includes(r.id)} onChange={e=>setSelectedRecordIds(e.target.checked?[...selectedRecordIds,r.id]:selectedRecordIds.filter(id=>id!==r.id))}/></td><td>{r.id}</td><td>{r.title}</td><td>{r.category}</td><td>{r.status}</td><td><button className="button danger-ghost" onClick={async()=>{if(confirm("Delete this complaint permanently?")){try{await api(`/api/v1/admin/records/${r.id}`,{method:"DELETE"});await load()}catch(e){setError(e instanceof Error?e.message:"Delete failed")}}}}>Delete</button></td></tr>)}</tbody></table></div>
     <h4 style={{marginTop:20}}>Shared groups</h4>
     {groups.map(g=><div key={g.id} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #eee"}}><span>{g.name} · owner #{g.owner_id}</span><button className="button danger-ghost" onClick={async()=>{if(confirm("Delete this group and its shared records?")){try{await api(`/api/v1/admin/groups/${g.id}`,{method:"DELETE"});await load()}catch(e){setError(e instanceof Error?e.message:"Delete failed")}}}}>Delete group</button></div>)}
     <h3 style={{marginTop:28}}>Security monitoring</h3>
     {security&&<><p>Failed logins in last 7 days: <strong>{security.failed_logins_last_7_days}</strong></p><p>By IP: {Object.entries(security.by_ip).map(([ip,n])=>`${ip} (${n})`).join(", ")||"No failed logins"}</p><p>By account: {Object.entries(security.by_account).map(([email,n])=>`${email} (${n})`).join(", ")||"No failed logins"}</p></>}
     <h3 style={{marginTop:28}}>Recent activity</h3>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}><input value={activityQuery} onChange={e=>setActivityQuery(e.target.value)} placeholder="Search event, IP or detail"/><select value={activityEvent} onChange={e=>setActivityEvent(e.target.value)}><option value="">All events</option><option value="login">Login</option><option value="failed_login">Failed login</option><option value="logout">Logout</option><option value="password_change">Password change</option><option value="role_change">Role change</option><option value="user_banned">Ban</option><option value="user_unbanned">Unban</option><option value="data_export">Export</option></select><button className="button secondary" onClick={()=>void load()}>Filter activity</button></div>
-    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Event</th><th>User ID</th><th>Details</th><th>Time</th></tr></thead><tbody>{activity.map(a=><tr key={a.id}><td>{a.event}</td><td>{a.user_id??"—"}</td><td>{a.detail??"—"}</td><td>{new Date(a.created_at).toLocaleString()}</td></tr>)}</tbody></table></div>
-    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:18}}>{["users","records","activity"].map(k=><a key={k} className="button secondary" href={`/api/v1/admin/export/${k}`} onClick={async e=>{e.preventDefault();try{const params=k==="users"?`?q=${encodeURIComponent(query)}&role=${roleFilter}`:k==="records"?`?status=${recordStatusFilter}`:`?q=${encodeURIComponent(activityQuery)}&event=${activityEvent}`;const data=await api<string>(`/api/v1/admin/export/${k}${params}`);const blob=new Blob([data],{type:"text/csv"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`campuscare-${k}.csv`;link.click();URL.revokeObjectURL(url)}catch(err){setError(err instanceof Error?err.message:"Export failed")}}}>Export {k} CSV</a>)}</div>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}><input value={activityQuery} onChange={e=>setActivityQuery(e.target.value)} placeholder="Search event, IP or detail"/><input value={activityUser} onChange={e=>setActivityUser(e.target.value)} placeholder="User ID" inputMode="numeric" style={{width:90}}/><select value={activityEvent} onChange={e=>setActivityEvent(e.target.value)}><option value="">All events</option><option value="login">Login</option><option value="failed_login">Failed login</option><option value="logout">Logout</option><option value="password_change">Password change</option><option value="role_change">Role change</option><option value="user_banned">Ban</option><option value="user_unbanned">Unban</option><option value="data_export">Export</option></select><button className="button secondary" onClick={()=>void load()}>Filter activity</button></div>
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Event</th><th>User ID</th><th>Details</th><th>IP address</th><th>Browser</th><th>Time</th></tr></thead><tbody>{activity.length===0?<tr><td colSpan={6}>No activity matches these filters.</td></tr>:activity.map(a=><tr key={a.id}><td>{a.event}</td><td>{a.user_id??"—"}</td><td>{a.detail??"—"}</td><td>{a.ip_address??"—"}</td><td title={a.user_agent??""}>{(a.user_agent??"—").slice(0,40)}</td><td>{new Date(a.created_at).toLocaleString()}</td></tr>)}</tbody></table></div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:18}}>{["users","records","activity"].map(k=><a key={k} className="button secondary" href={`/api/v1/admin/export/${k}`} onClick={async e=>{e.preventDefault();try{const params=k==="users"?`?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}`:k==="records"?`?status=${recordStatusFilter}&category=${recordCategoryFilter}`:`?q=${encodeURIComponent(activityQuery)}&event=${activityEvent}`;const data=await api<string>(`/api/v1/admin/export/${k}${params}`);const blob=new Blob([data],{type:"text/csv"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`campuscare-${k}.csv`;link.click();URL.revokeObjectURL(url)}catch(err){setError(err instanceof Error?err.message:"Export failed")}}}>Export {k} CSV</a>)}</div>
   </section>
 }
 
@@ -411,7 +419,7 @@ function UserManagementPage() {
 function WorkspaceTools() {
   const [groups,setGroups]=useState<Array<{id:number;name:string;owner_id:number}>>([])
   const [selected,setSelected]=useState<number|null>(null)
-  const [members,setMembers]=useState<Array<{user_id:number;can_create:boolean;can_edit:boolean;can_assign:boolean;is_owner:boolean}>>([])
+  const [members,setMembers]=useState<Array<{user_id:number;full_name:string|null;email:string|null;can_create:boolean;can_edit:boolean;can_assign:boolean;is_owner:boolean}>>([])
   const [records,setRecords]=useState<Array<{id:number;title:string;body:string;assignee_id:number|null}>>([])
   const [groupName,setGroupName]=useState("")
   const [memberId,setMemberId]=useState("")
@@ -470,7 +478,7 @@ function WorkspaceTools() {
       <p className="eyebrow">COLLABORATION</p><h2>Groups & shared work</h2>
       <form onSubmit={createGroup} style={{display:"flex",gap:8,flexWrap:"wrap"}}><input value={groupName} onChange={e=>setGroupName(e.target.value)} placeholder="New group name" required minLength={2}/><button className="button primary">Create group</button></form>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"16px 0"}}>{groups.map(g=><button key={g.id} className={selected===g.id?"button primary":"button secondary"} onClick={()=>setSelected(g.id)}>{g.name}</button>)}</div>
-      {activeGroup&&<><h3>{activeGroup.name}</h3><h4>Members and permissions</h4>{members.map(m=><div key={m.user_id} style={{padding:"6px 0",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><span>User #{m.user_id} {m.is_owner?"(owner)":""} · Create: {m.can_create?"yes":"no"} · Edit: {m.can_edit?"yes":"no"} · Assign: {m.can_assign?"yes":"no"}</span>{activeGroup.owner_id===profile?.id&&!m.is_owner&&<button className="button danger-ghost" onClick={async()=>{await api(`/api/v1/groups/${selected}/members/${m.user_id}`,{method:"DELETE"});await loadSelected(selected!)}}>Remove member</button>}</div>)}
+      {activeGroup&&<><h3>{activeGroup.name}</h3><h4>Members and permissions</h4>{members.map(m=><div key={m.user_id} style={{padding:"6px 0",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><span>{m.full_name??"User"} (#{m.user_id}) {m.is_owner?"(owner)":""} · Create: {m.can_create?"yes":"no"} · Edit: {m.can_edit?"yes":"no"} · Assign: {m.can_assign?"yes":"no"}</span>{activeGroup.owner_id===profile?.id&&!m.is_owner&&<button className="button danger-ghost" onClick={async()=>{await api(`/api/v1/groups/${selected}/members/${m.user_id}`,{method:"DELETE"});await loadSelected(selected!)}}>Remove member</button>}</div>)}
       {activeGroup.owner_id===profile?.id&&<form onSubmit={addMember} style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginTop:12}}><input type="number" min="1" value={memberId} onChange={e=>setMemberId(e.target.value)} placeholder="User ID" required/><label><input type="checkbox" checked={permissions.can_create} onChange={e=>setPermissions({...permissions,can_create:e.target.checked})}/> Create</label><label><input type="checkbox" checked={permissions.can_edit} onChange={e=>setPermissions({...permissions,can_edit:e.target.checked})}/> Edit</label><label><input type="checkbox" checked={permissions.can_assign} onChange={e=>setPermissions({...permissions,can_assign:e.target.checked})}/> Assign</label><button className="button secondary">Save member permissions</button></form>}
       <h4 style={{marginTop:20}}>Shared records</h4>{records.map(r=><article key={r.id} style={{padding:12,border:"1px solid #eee",borderRadius:10,marginBottom:8}}><strong>{r.title}</strong><p>{r.body}</p><small>Assignee: {r.assignee_id??"Unassigned"}</small><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>{(activeGroup.owner_id===profile?.id||members.find(m=>m.user_id===profile?.id)?.can_edit)&&<button className="button secondary" onClick={async()=>{const body=prompt("Update shared record description",r.body);if(body!==null){await api(`/api/v1/groups/${selected}/records/${r.id}`,{method:"PATCH",body:JSON.stringify({body})});await loadSelected(selected!)}}}>Edit record</button>}{(activeGroup.owner_id===profile?.id||members.find(m=>m.user_id===profile?.id)?.can_assign)&&<button className="button secondary" onClick={async()=>{const value=prompt("Assign to user ID (leave blank to unassign)",r.assignee_id?String(r.assignee_id):"");if(value!==null){await api(`/api/v1/groups/${selected}/records/${r.id}`,{method:"PATCH",body:JSON.stringify({assignee_id:value.trim()?Number(value):null})});await loadSelected(selected!)}}}>Assign</button>}</div></article>)}
       {(activeGroup.owner_id===profile?.id||members.find(m=>m.user_id===profile?.id)?.can_create)&&<form onSubmit={addRecord} style={{display:"grid",gap:8,marginTop:12}}><input value={recordTitle} onChange={e=>setRecordTitle(e.target.value)} placeholder="Shared task title" required minLength={3}/><textarea value={recordBody} onChange={e=>setRecordBody(e.target.value)} placeholder="Description" required/><button className="button primary">Create shared record</button></form>}
@@ -489,7 +497,11 @@ export default function App() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [page, setPage] = useState<"home"|"about"|"complaints"|"profile"|"contact"|"admin"|"users">("home")
+  const [page, setPageState] = useState<Page>(pageFromHash)
+  const setPage = useCallback((next: Page) => {
+    window.location.hash = next === "home" ? "" : `/${next}`
+    setPageState(next)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -503,8 +515,10 @@ export default function App() {
       if(alive){currentRole=me.role;setUser(me)}
     }).catch(()=>{}).finally(()=>{if(alive)setRestoring(false)})
     const expired=()=>{if(alive){accessToken="";currentRole="user";setUser(null);setPage("home");setError("Your session expired. Please sign in again.")}}
+    const onHash=()=>{if(alive)setPageState(pageFromHash())}
     window.addEventListener("campuscare:session-expired",expired)
-    return ()=>{alive=false;window.removeEventListener("campuscare:session-expired",expired)}
+    window.addEventListener("hashchange",onHash)
+    return ()=>{alive=false;window.removeEventListener("campuscare:session-expired",expired);window.removeEventListener("hashchange",onHash)}
   },[])
 
   async function submit(e:FormEvent<HTMLFormElement>) {
@@ -512,7 +526,7 @@ export default function App() {
     try {
       if(mode==="signup") await api("/api/v1/auth/signup",{method:"POST",body:JSON.stringify({email,full_name:name,password})})
       const tokens=await api<{access_token:string;user:{id:number;email:string;full_name:string;role:"user"|"admin"}}>("/api/v1/auth/login",{method:"POST",body:JSON.stringify({email,password})})
-      accessToken=tokens.access_token;currentRole=tokens.user.role;setUser(tokens.user);setPage("home")
+      accessToken=tokens.access_token;currentRole=tokens.user.role;setUser(tokens.user)
     } catch(err) {setError(err instanceof Error?err.message:"Authentication failed")}
     finally {setBusy(false)}
   }
@@ -537,7 +551,7 @@ export default function App() {
     <p style={{marginTop:18}}>{mode==="login"?"New to CampusCare?":"Already registered?"} <button className="refresh-link" onClick={()=>{setMode(mode==="login"?"signup":"login");setError("")}}>{mode==="login"?"Create an account":"Sign in"}</button></p>
   </section></main>
 
-  const navItems: {id:"home"|"about"|"complaints"|"profile"|"contact"|"admin"|"users";label:string}[] = [
+  const navItems: {id:Page;label:string}[] = [
     {id:"home",label:"Home"},{id:"about",label:"About"},{id:"complaints",label:"Complaints"},
     {id:"profile",label:"My Profile"},{id:"contact",label:"Contact"},
     ...(user.role==="admin"?[{id:"admin" as const,label:"Admin"},{id:"users" as const,label:"Users"}]:[]),
@@ -583,6 +597,7 @@ export default function App() {
       {page==="profile"&&<WorkspaceTools/>}
       {page==="admin"&&user.role==="admin"&&<AdminDashboard/>}
       {page==="users"&&user.role==="admin"&&<UserManagementPage/>}
+      {(page==="admin"||page==="users")&&user.role!=="admin"&&<section className="info-page panel" role="alert"><p className="eyebrow">ACCESS DENIED</p><h1>Administrators <em>only.</em></h1><p className="info-lead">Your account does not have permission to open this page. The server enforces the same rule on every admin request.</p><button className="button primary" onClick={()=>setPage("home")}>Back to home</button></section>}
 
       {page==="contact"&&<section className="info-page contact-page panel">
         <p className="eyebrow">WE ARE HERE TO HELP</p><h1>Contact & <em>support.</em></h1>
