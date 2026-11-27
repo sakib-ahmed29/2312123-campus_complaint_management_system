@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin: reports"])
 
 def _safe_csv_cell(value: object) -> object:
     """Neutralize spreadsheet formulas in untrusted text fields."""
-    if isinstance(value, str) and value.lstrip(" \\t\\r\\n").startswith(("=", "+", "-", "@")):
+    if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
         return "'" + value
     return value
 
@@ -77,7 +77,7 @@ def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(req
                  role: str | None = None, q: str = "", event: str | None = None,
                  category: str | None = None, user_id: int | None = None):
     output = io.StringIO(newline="")
-    output.write("\\ufeff")
+    output.write("\ufeff")
     writer = csv.writer(output)
 
     def write_row(values: list[object]) -> None:
