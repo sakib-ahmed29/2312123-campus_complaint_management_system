@@ -341,7 +341,7 @@ def test_user_export_respects_status_and_role_filters(client):
         admin = db.get(User, admin_id)
         target = db.get(User, target_id)
         admin.role = "admin"
-        target.full_name = "=HYPERLINK("https://example.test","click")"
+        target.full_name = '=HYPERLINK("https://example.test","click")'
         db.add(admin)
         db.add(target)
         db.commit()
