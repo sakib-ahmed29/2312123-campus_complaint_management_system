@@ -37,7 +37,7 @@ A secure multi-user campus complaint platform built with React + TypeScript, Fas
 
 ### Admin workspace
 - Overview statistics and searchable user list.
-- Role changes, ban/unban and session revocation.
+- Role changes, ban/unban and session revocation. Administrators cannot change their own role or ban another administrator.
 - Complaint and group moderation.
 - Activity/audit history and security summary.
 - CSV exports for users, records and activity.
@@ -58,23 +58,35 @@ Swagger documentation: `/api/docs`
 
 ## Project structure
 
+The application is organized by feature so screens, API boundaries, shared types and backend responsibilities have clear homes.
+
 ```
 backend/
-  main.py                 entrypoint (main:app)
-  seed_demo.py            demo accounts and sample data
+  main.py
   campuscare/
-    app.py                application factory, CORS, lifespan
-    config.py database.py environment settings, engine and session
-    models.py schemas.py  database tables, request payloads
-    security.py           password hashing, JWT, RBAC permission map and dependencies
-    audit.py validation.py errors.py   audit log, input checks, consistent errors
-    routers/              auth, users, complaints, groups, admin_users, admin_content, admin_reports
-  tests/                  pytest suite
-  migrations/             SQL for Supabase
-frontend/src/             React + TypeScript app
-docs/                     PRD, SRS, TDD and FINAL_REPORT.md
+    app.py                 FastAPI application factory and middleware
+    routers/               auth, users, complaints, groups and admin endpoints
+    models.py schemas.py   SQLModel tables and validated request contracts
+    security.py            JWT, Argon2 + pepper, permissions and auth dependencies
+    database.py config.py  PostgreSQL/SQLite engine and environment settings
+    audit.py errors.py     audit recording and consistent API error responses
+  migrations/              additive SQL migrations for Supabase
+  tests/                   pytest authentication, ownership and RBAC coverage
+frontend/src/
+  features/
+    complaints/            complaint CRUD and status workspace
+    admin/                 administrator overview and user management
+    profile/               account, sessions and shared-group workspace
+  services/                same-origin API client and refresh handling
+  types/                   shared TypeScript domain contracts
+  utils/                   formatting and hash navigation helpers
+  App.tsx                  app shell, session restore and page composition
+  main.tsx index.css       React entry point and global styles
+docs/                      PRD, SRS, TDD and final report
+vercel.json                same-origin /api routing to FastAPI
 ```
 
+Backend endpoints remain the security boundary: frontend route visibility is only a usability aid; ownership and role checks are enforced on every protected API request.
 ## Local setup (Windows PowerShell)
 
 ### 1. Backend
@@ -157,7 +169,7 @@ pip install -r requirements.txt
 pytest -q
 ```
 
-The regression tests cover missing/expired JWT rejection, complaint ownership, user denial of admin-only status changes, admin status updates, admin safety rules and group permission enforcement. GitHub Actions also runs the backend tests and frontend production build for pushes to this development branch and pull requests to main.
+The regression tests cover missing/expired JWT rejection, complaint ownership, user denial of admin-only status changes, admin status updates, admin safety rules and group permission enforcement. GitHub Actions also runs the backend tests and frontend production build for pushes to this feature branches and pull requests to main.
 
 ## Deployment and submission
 

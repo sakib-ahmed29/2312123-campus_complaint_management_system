@@ -84,7 +84,7 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     except (jwt.PyJWTError, KeyError, ValueError):
         raise HTTPException(401, "Invalid or expired access token")
     user = session.get(User, user_id)
-    if not user or user.is_banned or claims.get("ver", 0) != user.token_version:
+    if not user or user.is_banned or claims.get("ver", 0) != user.token_version or claims.get("role") != user.role:
         raise HTTPException(401, "Session is not valid")
     if account_is_suspended(user):
         raise HTTPException(403, f"Account suspended until {user.suspended_until.isoformat()}")

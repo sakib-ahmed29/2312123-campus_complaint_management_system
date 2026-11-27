@@ -20,6 +20,13 @@ from campuscare.utils import now
 router = APIRouter(prefix="/api/v1/admin", tags=["admin: reports"])
 
 
+def _safe_csv_cell(value: object) -> object:
+    """Neutralize spreadsheet formulas in untrusted text fields."""
+    if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 @router.get("/stats")
 def admin_stats(admin: Annotated[User, Depends(require_permission("admin:access"))], session: Annotated[Session, Depends(get_session)]):
     week = now() - timedelta(days=7)
@@ -68,11 +75,15 @@ def admin_security(admin: Annotated[User, Depends(require_permission("admin:acce
 def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(require_permission("admin:access"))],
                  session: Annotated[Session, Depends(get_session)], status: str | None = None,
                  role: str | None = None, q: str = "", event: str | None = None,
-                 category: str | None = None):
-    output = io.StringIO()
+                 category: str | None = None, user_id: int | None = None):
+    output = io.StringIO(newline="")
+    output.write("\ufeff")
     writer = csv.writer(output)
+
+    def write_row(values: list[object]) -> None:
+        writer.writerow([_safe_csv_cell(value) for value in values])
     if kind == "users":
-        writer.writerow(["id", "email", "full_name", "role", "is_banned", "created_at"])
+        write_row(["id", "email", "full_name", "role", "is_banned", "created_at"])
         statement = select(User)
         if role in ("user", "admin"):
             statement = statement.where(User.role == role)
@@ -84,29 +95,31 @@ def admin_export(kind: str, request: Request, admin: Annotated[User, Depends(req
             statement = statement.where(User.is_banned == False).where((User.suspended_until == None) | (User.suspended_until <= now()))
         if q:
             statement = statement.where(User.email.contains(q.lower()) | User.full_name.contains(q))
-        for u in session.exec(statement.order_by(User.id)).all():
-            writer.writerow([u.id, u.email, u.full_name, u.role, u.is_banned, u.created_at.isoformat()])
+        for u in session.exec(statement.order_by(User.id).limit(10000)).all():
+            write_row([u.id, u.email, u.full_name, u.role, u.is_banned, u.created_at.isoformat()])
     elif kind == "records":
-        writer.writerow(["id", "owner_id", "title", "category", "status", "created_at"])
+        write_row(["id", "owner_id", "title", "category", "status", "created_at"])
         statement = select(Complaint)
         if status:
             statement = statement.where(Complaint.status == status)
         if category:
             statement = statement.where(Complaint.category == category)
-        for c in session.exec(statement.order_by(Complaint.id)).all():
-            writer.writerow([c.id, c.owner_id, c.title, c.category, c.status, c.created_at.isoformat()])
+        for c in session.exec(statement.order_by(Complaint.id).limit(10000)).all():
+            write_row([c.id, c.owner_id, c.title, c.category, c.status, c.created_at.isoformat()])
     elif kind == "activity":
-        writer.writerow(["id", "user_id", "event", "ip_address", "user_agent", "created_at"])
+        write_row(["id", "user_id", "event", "ip_address", "user_agent", "created_at"])
         statement = select(AuditEvent)
         if event:
             statement = statement.where(AuditEvent.event == event)
+        if user_id is not None:
+            statement = statement.where(AuditEvent.user_id == user_id)
         if q:
             statement = statement.where(AuditEvent.detail.contains(q) | AuditEvent.ip_address.contains(q) | AuditEvent.user_agent.contains(q) | AuditEvent.event.contains(q))
-        for a in session.exec(statement.order_by(AuditEvent.id.desc())).all():
-            writer.writerow([a.id, a.user_id, a.event, a.ip_address, a.user_agent, a.created_at.isoformat()])
+        for a in session.exec(statement.order_by(AuditEvent.id.desc()).limit(10000)).all():
+            write_row([a.id, a.user_id, a.event, a.ip_address, a.user_agent, a.created_at.isoformat()])
     else:
         raise HTTPException(404, "Unknown export type")
-    log_event(session, request, "data_export", admin.id, kind, detail=f"status={status}; role={role}; event={event}; q={q}")
+    log_event(session, request, "data_export", admin.id, kind, detail=f"status={status}; role={role}; event={event}; user_id={user_id}; category={category}; q={q}")
     session.commit()
     return Response(content=output.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="campuscare-{kind}.csv"'})

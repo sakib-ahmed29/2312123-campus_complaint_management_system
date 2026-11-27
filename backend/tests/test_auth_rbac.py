@@ -232,27 +232,75 @@ def test_admin_can_suspend_and_restore_a_user_account(client):
 
 
 
-def test_admin_can_demote_self_when_another_admin_remains(client):
-    first_admin_id = signup(client, "self-demote@example.test")
-    second_admin_id = signup(client, "remaining-admin@example.test")
+def test_admin_cannot_change_own_role(client):
+    admin_id = signup(client, "self-role@example.test")
     with Session(engine) as db:
-        first_admin = db.get(User, first_admin_id)
-        second_admin = db.get(User, second_admin_id)
-        first_admin.role = "admin"
-        second_admin.role = "admin"
-        db.add(first_admin)
-        db.add(second_admin)
+        admin = db.get(User, admin_id)
+        admin.role = "admin"
+        db.add(admin)
         db.commit()
 
-    token = login(client, "self-demote@example.test")
-    demoted = client.patch("/api/v1/users/me/role", headers=headers(token))
-    assert demoted.status_code == 200, demoted.text
-    assert demoted.json() == {"id": first_admin_id, "role": "user"}
-    assert client.get("/api/v1/users/me", headers=headers(token)).status_code == 401
-    assert client.post("/api/v1/auth/refresh").status_code == 401
+    token = login(client, "self-role@example.test")
+    denied = client.patch(f"/api/v1/admin/users/{admin_id}/role",
+                          headers=headers(token), json={"role": "user"})
+    assert denied.status_code == 400
+    assert client.patch("/api/v1/users/me/role", headers=headers(token)).status_code == 404
     with Session(engine) as db:
-        assert db.get(User, first_admin_id).role == "user"
-        assert db.get(User, second_admin_id).role == "admin"
+        assert db.get(User, admin_id).role == "admin"
+
+
+def test_access_token_role_claim_must_match_database_role(client):
+    user_id = signup(client, "role-claim@example.test")
+    forged_role = jwt.encode({
+        "sub": str(user_id), "role": "admin", "ver": 0,
+        "iat": now(), "exp": now() + timedelta(minutes=5),
+    }, os.environ["JWT_SECRET"], algorithm="HS256")
+    assert client.get("/api/v1/users/me", headers=headers(forged_role)).status_code == 401
+    assert client.get("/api/v1/users/me", headers=headers(forged_role + "tampered")).status_code == 401
+
+
+def test_login_lockout_is_enforced_per_account_and_per_ip(client):
+    signup(client, "lockout@example.test")
+    for index in range(8):
+        response = client.post("/api/v1/auth/login", json={
+            "email": "lockout@example.test", "password": "wrong-password"
+        }, headers={"X-Forwarded-For": f"198.51.100.{index + 1}"})
+        assert response.status_code == 401
+
+    account_locked = client.post("/api/v1/auth/login", json={
+        "email": "lockout@example.test", "password": "campus1234"
+    }, headers={"X-Forwarded-For": "198.51.100.99"})
+    assert account_locked.status_code == 429
+
+    shared_ip = "203.0.113.77"
+    for index in range(40):
+        response = client.post("/api/v1/auth/login", json={
+            "email": f"unknown-{index}@example.test", "password": "wrong-password"
+        }, headers={"X-Forwarded-For": shared_ip})
+        assert response.status_code == 401
+    assert client.post("/api/v1/auth/login", json={
+        "email": "another-unknown@example.test", "password": "wrong-password"
+    }, headers={"X-Forwarded-For": shared_ip}).status_code == 429
+
+
+def test_activity_export_respects_user_id_filter(client):
+    admin_id = signup(client, "activity-admin@example.test")
+    target_id = signup(client, "activity-target@example.test")
+    with Session(engine) as db:
+        admin = db.get(User, admin_id)
+        admin.role = "admin"
+        db.add(admin)
+        db.commit()
+    admin_token = login(client, "activity-admin@example.test")
+    login(client, "activity-target@example.test")
+
+    export = client.get(
+        f"/api/v1/admin/export/activity?event=login&user_id={target_id}",
+        headers=headers(admin_token),
+    )
+    assert export.status_code == 200, export.text
+    assert f",{target_id},login," in export.text
+    assert f",{admin_id},login," not in export.text
 
 
 def test_invalid_email_and_validation_errors_use_one_error_shape(client):
@@ -291,8 +339,11 @@ def test_user_export_respects_status_and_role_filters(client):
     target_id = signup(client, "export-target@example.test")
     with Session(engine) as db:
         admin = db.get(User, admin_id)
+        target = db.get(User, target_id)
         admin.role = "admin"
+        target.full_name = '=HYPERLINK("https://example.test","click")'
         db.add(admin)
+        db.add(target)
         db.commit()
     admin_token = login(client, "export-admin@example.test")
     assert client.post(f"/api/v1/admin/users/{target_id}/ban", headers=headers(admin_token),
@@ -300,6 +351,7 @@ def test_user_export_respects_status_and_role_filters(client):
     banned = client.get("/api/v1/admin/export/users?status=banned", headers=headers(admin_token))
     assert banned.status_code == 200
     assert "export-target@example.test" in banned.text
+    assert "'=HYPERLINK" in banned.text
     assert "export-admin@example.test" not in banned.text
     admins = client.get("/api/v1/admin/export/users?role=admin", headers=headers(admin_token))
     assert "export-admin@example.test" in admins.text
