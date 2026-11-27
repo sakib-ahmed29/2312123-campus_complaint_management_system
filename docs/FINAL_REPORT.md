@@ -6,9 +6,9 @@
 **Student ID:** 2312123  
 **Repository:** https://github.com/sakib-ahmed29/2312123-campus_complaint_management_system  
 **Production application:** https://2312123-campuscomplaintmanagementsystem-sakib-ahmed-iub.vercel.app  
-**Production deployment:** https://2312123-campuscomplaintmanagementsystem-1mmqheb1v.vercel.app  
+**Production deployment:** https://2312123-campuscomplaintmanagementsystem-6ab0z4cmz.vercel.app  
 **Release branch:** `main`  
-**Verified main commit:** `0d0798e88345c0aee3d623805a872774ed92d550`  
+**Verified main commit:** `0b4eab08230a4bd2c430df09023481e24073d1cc`  
 **Report verification date:** 26 November 2026
 
 ## 1. Project status
@@ -40,7 +40,7 @@ The production deployment for the verified `main` commit is READY.
 | GitHub Actions backend job | Passed; dependencies installed and `pytest -q` |
 | Vercel runtime errors | No errors reported in the checked 24-hour window |
 
-CI run: https://github.com/sakib-ahmed29/2312123-campus_complaint_management_system/actions/runs/45864443699
+CI run: https://github.com/sakib-ahmed29/2312123-campus_complaint_management_system/actions/runs/45868103585
 
 These checks establish that the production frontend and API endpoints are reachable and that the repository's automated build and test jobs pass. They do not replace manual browser testing of every account role and workflow.
 

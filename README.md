@@ -145,6 +145,13 @@ For the instructor demonstration, the idempotent `backend/seed_demo.py` script c
 Run these commands from the repository root. Vercel CLI must be logged in and this repository must be linked to the CampusCare Vercel project:
 
 ```powershell
+# Prepare the backend virtual environment and install its dependencies.
+if (-not (Test-Path "backend\.venv\Scripts\Activate.ps1")) {
+    py -m venv backend\.venv
+}
+.\backend\.venv\Scripts\Activate.ps1
+python -m pip install -r backend\requirements.txt
+
 npx vercel login
 npx vercel link --project 2312123-campus_complaint_management_system --scope sakib-ahmed-iub
 npx vercel env pull .env.production.local --environment production
