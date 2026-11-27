@@ -56,6 +56,25 @@ Swagger documentation: `/api/docs`
 | Groups | `/api/v1/groups` (groups, members, shared records) |
 | Admin | `/api/v1/admin/stats`, `/users`, `/activity`, `/security`, `/records`, `/groups`, `/export/{kind}` |
 
+## Project structure
+
+```
+backend/
+  main.py                 entrypoint (main:app)
+  seed_demo.py            demo accounts and sample data
+  campuscare/
+    app.py                application factory, CORS, lifespan
+    config.py database.py environment settings, engine and session
+    models.py schemas.py  database tables, request payloads
+    security.py           password hashing, JWT, RBAC permission map and dependencies
+    audit.py validation.py errors.py   audit log, input checks, consistent errors
+    routers/              auth, users, complaints, groups, admin_users, admin_content, admin_reports
+  tests/                  pytest suite
+  migrations/             SQL for Supabase
+frontend/src/             React + TypeScript app
+docs/                     PRD, SRS, TDD and FINAL_REPORT.md
+```
+
 ## Local setup (Windows PowerShell)
 
 ### 1. Backend
@@ -97,6 +116,7 @@ Copy `.env.example` to a local `.env` file or configure the values in Vercel Pro
 | `ACCESS_TOKEN_MINUTES` | No | Defaults to 15; maximum is 15 |
 | `REFRESH_TOKEN_DAYS` | No | Defaults to 7 |
 | `COOKIE_SECURE` | Yes | Set `true` on HTTPS production; `false` only for local HTTP |
+| `ALLOWED_ORIGINS` | Recommended | Comma-separated frontend origins for CORS, e.g. `https://your-app.vercel.app` |
 
 For Vercel, use the Supabase transaction pooler (typically port 6543). The backend uses psycopg 3 and disables prepared statements for transaction-pooler compatibility. Do not expose database credentials or JWT secrets in frontend variables.
 
@@ -104,22 +124,28 @@ The backend creates missing tables and adds the complaint ownership column to an
 
 ## Initial admin setup and instructor accounts
 
-Public signup always creates a normal `user`. To create instructor demo accounts:
+Public signup always creates a normal `user`. Demo data is created with the idempotent seed script, which reads the demo password from the environment (never stored in the repo). Use the same `DATABASE_URL`, `JWT_SECRET` and `PASSWORD_PEPPER` as production:
 
-1. Register at least five demo accounts using the application.
-2. In Supabase SQL Editor, promote two demo accounts to admin:
-
-```sql
-UPDATE "user"
-SET role = 'admin'
-WHERE email IN ('admin1@example.test', 'admin2@example.test');
+```powershell
+cd backend
+$env:DATABASE_URL="<supabase pooler url>"
+$env:JWT_SECRET="<same as Vercel>"
+$env:PASSWORD_PEPPER="<same as Vercel>"
+$env:DEMO_PASSWORD="<demo-only password with a letter and a number>"
+python seed_demo.py
 ```
 
-3. Keep at least three other accounts as normal users.
-4. Create one shared group owned by a normal user and add members with mixed create/edit/assign permissions.
-5. Use demo-only passwords. Put passwords only in the submission form and PDF report, never in README or source control.
+It creates 2 admins, 3 normal users, sample complaints, and one shared group, then prints the user IDs. Copy them into the table below (replace the `?` after running the script). Passwords go only in the submission form and the PDF report.
 
-Replace the example emails in the SQL statement with the exact demo email addresses you registered.
+| User ID | Role | Email |
+|---|---|---|
+| ? | admin | admin1@campuscare.test |
+| ? | admin | admin2@campuscare.test |
+| ? | user | student1@campuscare.test (owner of the shared group) |
+| ? | user | student2@campuscare.test (group member: create + edit) |
+| ? | user | student3@campuscare.test (group member: assign only) |
+
+Shared group: **Hostel Maintenance Team**, owned by student1. Only the owner can rename, delete or manage members; student2 can create and edit records; student3 can assign records only.
 
 ## Tests
 
