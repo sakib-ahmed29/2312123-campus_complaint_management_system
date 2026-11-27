@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
-import { api, currentRole, setAccessToken, setCurrentRole } from "../../services/api"
+import { api, setAccessToken, setCurrentRole } from "../../services/api"
 
 export default function WorkspaceTools() {
   const [groups,setGroups]=useState<Array<{id:number;name:string;owner_id:number}>>([])
@@ -40,14 +40,6 @@ export default function WorkspaceTools() {
   async function addRecord(e:FormEvent){e.preventDefault();if(selected===null)return;try{await api(`/api/v1/groups/${selected}/records`,{method:"POST",body:JSON.stringify({title:recordTitle,body:recordBody})});setRecordTitle("");setRecordBody("");await loadSelected(selected);setMessage("Shared record created.")}catch(x){setError(x instanceof Error?x.message:"Could not create record")}}
   async function saveProfile(e:FormEvent){e.preventDefault();try{const p=await api<typeof profile>("/api/v1/users/me",{method:"PATCH",body:JSON.stringify({email:newEmail,full_name:newName})});setProfile(p);setMessage("Profile updated.")}catch(x){setError(x instanceof Error?x.message:"Could not update profile")}}
   async function changePassword(e:FormEvent){e.preventDefault();try{await api("/api/v1/users/me/password",{method:"POST",body:JSON.stringify({current_password:currentPassword,new_password:newPassword})});setCurrentPassword("");setNewPassword("");setMessage("Password changed. Sign in again with the new password.");await signOutFromTools()}catch(x){setError(x instanceof Error?x.message:"Could not change password")}}
-  async function demoteSelf(){
-    if(!window.confirm("Change your own role from administrator to user? You will be signed out, and another administrator must restore your admin access."))return
-    setError("");setMessage("")
-    try{
-      await api("/api/v1/users/me/role",{method:"PATCH"})
-      await signOutFromTools()
-    }catch(x){setError(x instanceof Error?x.message:"Could not leave administrator role")}
-  }
   async function signOutFromTools(){setAccessToken("");setCurrentRole("user");window.dispatchEvent(new Event("campuscare:session-expired"))}
   async function revoke(id:number){try{await api(`/api/v1/auth/sessions/${id}`,{method:"DELETE"});setSessions(await api<typeof sessions>("/api/v1/auth/sessions"));setMessage("Session revoked.")}catch(x){setError(x instanceof Error?x.message:"Could not revoke session")}}
   const activeGroup=groups.find(g=>g.id===selected)
@@ -57,7 +49,6 @@ export default function WorkspaceTools() {
       <p className="eyebrow">ACCOUNT SECURITY</p><h2>Profile & sessions</h2>
       <form onSubmit={saveProfile} className="form-grid"><label>Full name<input value={newName} onChange={e=>setNewName(e.target.value)} required minLength={2}/></label><label>Email<input type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} required/></label><button className="button primary">Save profile</button></form>
       <form onSubmit={changePassword} className="form-grid" style={{marginTop:18}}><label>Current password<input type="password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} required/></label><label>New password<input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} required minLength={8}/></label><button className="button secondary">Change password</button></form>
-      {currentRole==="admin"&&<div style={{marginTop:24,paddingTop:18,borderTop:"1px solid #eee"}}><h3>Administrator access</h3><p className="muted">You can leave the administrator role yourself. CampusCare will prevent this if you are the last remaining administrator.</p><button type="button" className="button danger-ghost" onClick={()=>void demoteSelf()}>Leave admin role</button></div>}
       <h3 style={{marginTop:24}}>Active sessions</h3>{sessions.map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",gap:12,padding:"8px 0",borderBottom:"1px solid #eee"}}><span>Session #{s.id} · {s.ip_address||"IP unavailable"} · Expires {new Date(s.expires_at).toLocaleString()}</span><button className="button danger-ghost" onClick={()=>void revoke(s.id)}>Revoke</button></div>)}
     </div>
     <div className="panel" style={{padding:24}}>
