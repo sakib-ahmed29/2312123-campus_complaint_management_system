@@ -97,6 +97,7 @@ Copy `.env.example` to a local `.env` file or configure the values in Vercel Pro
 | `ACCESS_TOKEN_MINUTES` | No | Defaults to 15; maximum is 15 |
 | `REFRESH_TOKEN_DAYS` | No | Defaults to 7 |
 | `COOKIE_SECURE` | Yes | Set `true` on HTTPS production; `false` only for local HTTP |
+| `ALLOWED_ORIGINS` | Recommended | Comma-separated frontend origins for CORS, e.g. `https://your-app.vercel.app` |
 
 For Vercel, use the Supabase transaction pooler (typically port 6543). The backend uses psycopg 3 and disables prepared statements for transaction-pooler compatibility. Do not expose database credentials or JWT secrets in frontend variables.
 

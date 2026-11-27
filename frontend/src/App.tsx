@@ -25,6 +25,12 @@ const statuses: { value: Status; label: string }[] = [
   { value: "pending", label: "Pending" }, { value: "in_progress", label: "In progress" },
   { value: "resolved", label: "Resolved" }, { value: "rejected", label: "Rejected" },
 ]
+type Page = "home" | "about" | "complaints" | "profile" | "contact" | "admin" | "users"
+const PAGES: Page[] = ["home", "about", "complaints", "profile", "contact", "admin", "users"]
+function pageFromHash(): Page {
+  const value = window.location.hash.replace(/^#\/?/, "")
+  return (PAGES as string[]).includes(value) ? (value as Page) : "home"
+}
 const emptyForm: ComplaintForm = { title: "", description: "", category: "academic" }
 
 let accessToken = ""
@@ -262,7 +268,7 @@ function ComplaintWorkspace() {
 function AdminDashboard() {
   const [stats, setStats] = useState<Record<string, number> | null>(null)
   const [users, setUsers] = useState<Array<{id:number;email:string;full_name:string;role:string;is_banned:boolean;status:"active"|"suspended"|"banned";suspended_until:string|null}>>([])
-  const [activity, setActivity] = useState<Array<{id:number;event:string;user_id:number|null;created_at:string;detail:string|null}>>([])
+  const [activity, setActivity] = useState<Array<{id:number;event:string;user_id:number|null;created_at:string;detail:string|null;ip_address:string|null;user_agent:string|null}>>([])
   const [records,setRecords]=useState<Array<{id:number;title:string;category:string;status:string;owner_id:number|null}>>([])
   const [groups,setGroups]=useState<Array<{id:number;name:string;owner_id:number}>>([])
   const [security,setSecurity]=useState<{failed_logins_last_7_days:number;by_ip:Record<string,number>;by_account:Record<string,number>}|null>(null)
@@ -332,8 +338,8 @@ function AdminDashboard() {
     {security&&<><p>Failed logins in last 7 days: <strong>{security.failed_logins_last_7_days}</strong></p><p>By IP: {Object.entries(security.by_ip).map(([ip,n])=>`${ip} (${n})`).join(", ")||"No failed logins"}</p><p>By account: {Object.entries(security.by_account).map(([email,n])=>`${email} (${n})`).join(", ")||"No failed logins"}</p></>}
     <h3 style={{marginTop:28}}>Recent activity</h3>
     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}><input value={activityQuery} onChange={e=>setActivityQuery(e.target.value)} placeholder="Search event, IP or detail"/><select value={activityEvent} onChange={e=>setActivityEvent(e.target.value)}><option value="">All events</option><option value="login">Login</option><option value="failed_login">Failed login</option><option value="logout">Logout</option><option value="password_change">Password change</option><option value="role_change">Role change</option><option value="user_banned">Ban</option><option value="user_unbanned">Unban</option><option value="data_export">Export</option></select><button className="button secondary" onClick={()=>void load()}>Filter activity</button></div>
-    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Event</th><th>User ID</th><th>Details</th><th>Time</th></tr></thead><tbody>{activity.map(a=><tr key={a.id}><td>{a.event}</td><td>{a.user_id??"—"}</td><td>{a.detail??"—"}</td><td>{new Date(a.created_at).toLocaleString()}</td></tr>)}</tbody></table></div>
-    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:18}}>{["users","records","activity"].map(k=><a key={k} className="button secondary" href={`/api/v1/admin/export/${k}`} onClick={async e=>{e.preventDefault();try{const params=k==="users"?`?q=${encodeURIComponent(query)}&role=${roleFilter}`:k==="records"?`?status=${recordStatusFilter}`:`?q=${encodeURIComponent(activityQuery)}&event=${activityEvent}`;const data=await api<string>(`/api/v1/admin/export/${k}${params}`);const blob=new Blob([data],{type:"text/csv"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`campuscare-${k}.csv`;link.click();URL.revokeObjectURL(url)}catch(err){setError(err instanceof Error?err.message:"Export failed")}}}>Export {k} CSV</a>)}</div>
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}><thead><tr><th>Event</th><th>User ID</th><th>Details</th><th>IP address</th><th>Browser</th><th>Time</th></tr></thead><tbody>{activity.length===0?<tr><td colSpan={6}>No activity matches these filters.</td></tr>:activity.map(a=><tr key={a.id}><td>{a.event}</td><td>{a.user_id??"—"}</td><td>{a.detail??"—"}</td><td>{a.ip_address??"—"}</td><td title={a.user_agent??""}>{(a.user_agent??"—").slice(0,40)}</td><td>{new Date(a.created_at).toLocaleString()}</td></tr>)}</tbody></table></div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:18}}>{["users","records","activity"].map(k=><a key={k} className="button secondary" href={`/api/v1/admin/export/${k}`} onClick={async e=>{e.preventDefault();try{const params=k==="users"?`?q=${encodeURIComponent(query)}&role=${roleFilter}&status=${statusFilter}`:k==="records"?`?status=${recordStatusFilter}`:`?q=${encodeURIComponent(activityQuery)}&event=${activityEvent}`;const data=await api<string>(`/api/v1/admin/export/${k}${params}`);const blob=new Blob([data],{type:"text/csv"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`campuscare-${k}.csv`;link.click();URL.revokeObjectURL(url)}catch(err){setError(err instanceof Error?err.message:"Export failed")}}}>Export {k} CSV</a>)}</div>
   </section>
 }
 
@@ -489,7 +495,11 @@ export default function App() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [page, setPage] = useState<"home"|"about"|"complaints"|"profile"|"contact"|"admin"|"users">("home")
+  const [page, setPageState] = useState<Page>(pageFromHash)
+  const setPage = useCallback((next: Page) => {
+    window.location.hash = next === "home" ? "" : `/${next}`
+    setPageState(next)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -503,8 +513,10 @@ export default function App() {
       if(alive){currentRole=me.role;setUser(me)}
     }).catch(()=>{}).finally(()=>{if(alive)setRestoring(false)})
     const expired=()=>{if(alive){accessToken="";currentRole="user";setUser(null);setPage("home");setError("Your session expired. Please sign in again.")}}
+    const onHash=()=>{if(alive)setPageState(pageFromHash())}
     window.addEventListener("campuscare:session-expired",expired)
-    return ()=>{alive=false;window.removeEventListener("campuscare:session-expired",expired)}
+    window.addEventListener("hashchange",onHash)
+    return ()=>{alive=false;window.removeEventListener("campuscare:session-expired",expired);window.removeEventListener("hashchange",onHash)}
   },[])
 
   async function submit(e:FormEvent<HTMLFormElement>) {
@@ -512,7 +524,7 @@ export default function App() {
     try {
       if(mode==="signup") await api("/api/v1/auth/signup",{method:"POST",body:JSON.stringify({email,full_name:name,password})})
       const tokens=await api<{access_token:string;user:{id:number;email:string;full_name:string;role:"user"|"admin"}}>("/api/v1/auth/login",{method:"POST",body:JSON.stringify({email,password})})
-      accessToken=tokens.access_token;currentRole=tokens.user.role;setUser(tokens.user);setPage("home")
+      accessToken=tokens.access_token;currentRole=tokens.user.role;setUser(tokens.user)
     } catch(err) {setError(err instanceof Error?err.message:"Authentication failed")}
     finally {setBusy(false)}
   }
@@ -537,7 +549,7 @@ export default function App() {
     <p style={{marginTop:18}}>{mode==="login"?"New to CampusCare?":"Already registered?"} <button className="refresh-link" onClick={()=>{setMode(mode==="login"?"signup":"login");setError("")}}>{mode==="login"?"Create an account":"Sign in"}</button></p>
   </section></main>
 
-  const navItems: {id:"home"|"about"|"complaints"|"profile"|"contact"|"admin"|"users";label:string}[] = [
+  const navItems: {id:Page;label:string}[] = [
     {id:"home",label:"Home"},{id:"about",label:"About"},{id:"complaints",label:"Complaints"},
     {id:"profile",label:"My Profile"},{id:"contact",label:"Contact"},
     ...(user.role==="admin"?[{id:"admin" as const,label:"Admin"},{id:"users" as const,label:"Users"}]:[]),
@@ -583,6 +595,7 @@ export default function App() {
       {page==="profile"&&<WorkspaceTools/>}
       {page==="admin"&&user.role==="admin"&&<AdminDashboard/>}
       {page==="users"&&user.role==="admin"&&<UserManagementPage/>}
+      {(page==="admin"||page==="users")&&user.role!=="admin"&&<section className="info-page panel" role="alert"><p className="eyebrow">ACCESS DENIED</p><h1>Administrators <em>only.</em></h1><p className="info-lead">Your account does not have permission to open this page. The server enforces the same rule on every admin request.</p><button className="button primary" onClick={()=>setPage("home")}>Back to home</button></section>}
 
       {page==="contact"&&<section className="info-page contact-page panel">
         <p className="eyebrow">WE ARE HERE TO HELP</p><h1>Contact & <em>support.</em></h1>
