@@ -190,9 +190,9 @@ After the script completes, it prints the account IDs and group ID. Use this tab
 |---|---|---|---|
 | Printed by script | admin | admin1@campuscare.test | Administrator |
 | Printed by script | admin | admin2@campuscare.test | Administrator |
-| Printed by script | user | student1@campuscare.test | Group owner |
-| Printed by script | user | student2@campuscare.test | Create + edit |
-| Printed by script | user | student3@campuscare.test | Assign only |
+| Printed by script | user | user1@campuscare.test | Group owner |
+| Printed by script | user | user2@campuscare.test | Create + edit |
+| Printed by script | user | user3@campuscare.test | Assign only |
 
 The script is safe to re-run for missing demo data. It does not reset passwords for existing demo users; keep the original demo password in a secure place for the instructor walkthrough.
 
