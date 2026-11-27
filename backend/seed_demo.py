@@ -14,7 +14,9 @@ import sys
 
 from sqlmodel import Session, SQLModel, select
 
-from main import (Complaint, Group, GroupMember, GroupRecord, User, engine, hash_password)
+from campuscare.database import engine
+from campuscare.models import Complaint, Group, GroupMember, GroupRecord, User
+from campuscare.security import hash_password
 
 ACCOUNTS = [
     ("admin1@campuscare.test", "Demo Admin One", "admin"),
