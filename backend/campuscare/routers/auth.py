@@ -4,10 +4,12 @@ from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from campuscare.audit import log_event
-from campuscare.config import ACCESS_MINUTES, COOKIE_NAME
+from campuscare.config import (ACCESS_MINUTES, COOKIE_NAME, LOGIN_LOCKOUT_MINUTES,
+                                LOGIN_MAX_FAILED_PER_ACCOUNT, LOGIN_MAX_FAILED_PER_IP)
 from campuscare.database import get_session
 from campuscare.models import LoginAttempt, RefreshSession, User
 from campuscare.schemas import Login, Signup
@@ -39,10 +41,22 @@ def signup(payload: Signup, request: Request, session: Annotated[Session, Depend
 def login(payload: Login, request: Request, response: Response, session: Annotated[Session, Depends(get_session)]):
     email = payload.email.strip().lower()
     ip = client_ip(request)
-    cutoff = now() - timedelta(minutes=15)
-    attempts = session.exec(select(LoginAttempt).where(LoginAttempt.email_key == email,
-        LoginAttempt.ip_address == ip, LoginAttempt.created_at >= cutoff, LoginAttempt.succeeded == False)).all()
-    if len(attempts) >= 8:
+    cutoff = now() - timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+    failed_for_account = session.exec(
+        select(func.count()).select_from(LoginAttempt).where(
+            LoginAttempt.email_key == email,
+            LoginAttempt.created_at >= cutoff,
+            LoginAttempt.succeeded == False,
+        )
+    ).one()
+    failed_for_ip = session.exec(
+        select(func.count()).select_from(LoginAttempt).where(
+            LoginAttempt.ip_address == ip,
+            LoginAttempt.created_at >= cutoff,
+            LoginAttempt.succeeded == False,
+        )
+    ).one()
+    if failed_for_account >= LOGIN_MAX_FAILED_PER_ACCOUNT or failed_for_ip >= LOGIN_MAX_FAILED_PER_IP:
         raise HTTPException(429, "Too many failed login attempts. Try again in 15 minutes.")
     user = session.exec(select(User).where(User.email == email)).first()
     valid = bool(user and verify_password(payload.password, user.password_hash))

@@ -14,3 +14,8 @@ COOKIE_NAME = "campuscare_refresh"
 # through the same origin (Vercel rewrites), so this only matters for cross-origin clients.
 ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv(
     "ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
+
+# Independent authentication throttles (rolling 15-minute window).
+LOGIN_LOCKOUT_MINUTES = 15
+LOGIN_MAX_FAILED_PER_ACCOUNT = 8
+LOGIN_MAX_FAILED_PER_IP = 40
